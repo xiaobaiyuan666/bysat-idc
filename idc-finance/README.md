@@ -28,7 +28,28 @@
 
 ## 启动
 
+如果要从仓库根目录统一拉起两套主项目：
+
+```bash
+cd ..
+npm run dev:all
+```
+
 ### API
+
+macOS / Linux：
+
+```bash
+npm run dev:api:unix
+```
+
+或直接：
+
+```bash
+go run ./apps/api/cmd/server
+```
+
+Windows：
 
 ```bash
 & "C:\Program Files\Go\bin\go.exe" run ./apps/api/cmd/server
@@ -38,6 +59,12 @@
 
 ```bash
 npm run dev:api:mysql
+```
+
+macOS / Linux 的 MySQL 模式：
+
+```bash
+npm run dev:api:mysql:unix
 ```
 
 健康检查：
@@ -114,10 +141,23 @@ npm run db:migrate:mysql
 npm run db:seed:mysql
 ```
 
+macOS / Linux：
+
+```bash
+npm run db:migrate:mysql:unix
+npm run db:seed:mysql:unix
+```
+
 一次完成初始化：
 
 ```bash
 npm run db:prepare:mysql
+```
+
+macOS / Linux：
+
+```bash
+npm run db:prepare:mysql:unix
 ```
 
 本机 MySQL 安装说明见：

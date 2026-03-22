@@ -1,4 +1,7 @@
 # vue-pure-admin 接入研究与迁移方案
+
+> 说明：本文档保留为历史迁移记录。当前默认后台入口已切换到 `idc-finance/apps/admin-web`，`admin-ui/` 不再参与默认开发流程。
+
 ## 本地基线
 
 - 官方仓库已拉取到 [vue-pure-admin-ref](C:/Users/Administrator/Desktop/IDC/vue-pure-admin-ref)

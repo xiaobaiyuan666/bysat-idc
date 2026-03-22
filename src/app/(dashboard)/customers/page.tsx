@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
-import { getAdminUiUrl } from "@/lib/admin-ui";
+import { getAdminConsoleUrl } from "@/lib/admin-console";
 
 export default function CustomersPage() {
-  redirect(getAdminUiUrl("/customers"));
+  redirect(getAdminConsoleUrl("/customer/list"));
 }

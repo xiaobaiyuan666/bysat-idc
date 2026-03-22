@@ -29,7 +29,7 @@
 
 ## 当前已验证
 - `npm run build`
-- `npm --prefix admin-ui run build`
+- `cd idc-finance && npm run build:admin`
 - `npm run lint`
 
 ## 模块结论汇总

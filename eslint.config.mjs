@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     "vendor/**",
     "public/vendor/**",
     "next-env.d.ts",
+    "idc-finance/**",
     "admin-ui/**",
     "vue-pure-admin-ref/**",
     "scui-ref/**",

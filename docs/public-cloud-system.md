@@ -14,7 +14,8 @@
 
 ### 1. 展示层
 
-- 管理后台：Vue 3 + Element Plus，运行在 `admin-ui/`
+- 管理后台：当前启用 `idc-finance/apps/admin-web`
+- 旧版 `admin-ui/` 已废弃，仅保留为历史参考
 - 客户门户：Next.js App Router，运行在 `src/app/portal/`
 
 ### 2. 业务层

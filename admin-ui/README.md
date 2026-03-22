@@ -1,5 +1,7 @@
-# Vue 3 + TypeScript + Vite
+# Archived Admin UI
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+`admin-ui/` 已废弃，不再参与默认开发、构建和联调流程。
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+当前默认后台入口为 `idc-finance/apps/admin-web`。
+
+此目录暂时保留，仅作为历史参考源码。

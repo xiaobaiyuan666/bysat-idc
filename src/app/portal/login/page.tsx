@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { PortalLoginForm } from "@/components/auth/portal-login-form";
 import { Card } from "@/components/ui/card";
+import { getAdminConsoleUrl } from "@/lib/admin-console";
 
 export default async function PortalLoginPage({
   searchParams,
@@ -10,6 +11,7 @@ export default async function PortalLoginPage({
 }) {
   const params = await searchParams;
   const hasError = Boolean(params.error);
+  const adminConsoleUrl = getAdminConsoleUrl("/login");
 
   return (
     <main className="portal-page-shell px-4 py-8">
@@ -57,12 +59,12 @@ export default async function PortalLoginPage({
           </div>
 
           <div className="mt-8 text-sm text-white/60">
-            运营后台入口:
+            新版运营后台入口:
             <Link
-              href="http://localhost:5173"
+              href={adminConsoleUrl}
               className="ml-2 font-medium underline underline-offset-4"
             >
-              http://localhost:5173
+              {adminConsoleUrl}
             </Link>
           </div>
         </section>

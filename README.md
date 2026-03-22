@@ -5,7 +5,8 @@
 ## 技术栈
 
 - `backend`：Next.js 16 + Prisma + SQLite
-- `admin-ui`：Vue 3 + Element Plus
+- `portal`：Next.js App Router
+- `rebuild admin`：`idc-finance/apps/admin-web`（Vue 3 + Element Plus）
 - `provider adapter`：可切换 mock / 真实接口的魔方云适配层
 
 ## 当前已具备能力
@@ -67,10 +68,22 @@
 ```bash
 npm install
 npm run db:reset
-npm --prefix admin-ui install
 ```
 
+说明：
+
+- 不额外配置环境变量时，本地会默认使用 `prisma/dev.db`
+- 如需覆盖，可自行设置 `DATABASE_URL`
+
 ## 启动
+
+一键启动全部本地服务（前台模式）：
+
+```bash
+npm run dev:all
+```
+
+按 `Ctrl-C` 会一起停止。
 
 后端：
 
@@ -78,18 +91,27 @@ npm --prefix admin-ui install
 npm run dev:backend
 ```
 
-前端：
+如需后台模式，辅助脚本会把日志与 PID 写到 `.codex-dev/`。
 
-```bash
-npm run dev:frontend
-```
+说明：
+
+- `admin-ui/` 已废弃，不再参与默认开发、构建和联调流程
+- 运营后台默认使用 `idc-finance/apps/admin-web`
+- 根项目旧后台路由会默认跳转到 `http://localhost:5177`
+
+## 默认入口
+
+- 根项目健康检查：`http://127.0.0.1:3000/api/health`
+- 客户门户：`http://localhost:3000/portal/login`
+- 新版运营后台：`http://localhost:5177/login`
+- 新版门户前端：`http://localhost:5178`
 
 ## 默认账号
 
-- 管理后台：`http://localhost:5173`
-- 健康检查：`http://127.0.0.1:3000/api/health`
-- 超级管理员：`admin@idc.local`
-- 默认密码：`Admin123!`
+- 根项目超级管理员：`admin@idc.local`
+- 根项目默认密码：`Admin123!`
+- 新版运营后台：`admin / Admin123!`
+- 新版门户：`portal / Portal123!`
 
 预置角色账号：
 
@@ -109,7 +131,6 @@ npm run dev:frontend
 ```bash
 npm run db:reset
 npm run build
-npm --prefix admin-ui run build
 npm run lint
 ```
 
@@ -117,6 +138,7 @@ npm run lint
 
 - `DATABASE_URL`
 - `AUTH_SECRET`
+- `IDC_FINANCE_ADMIN_BASE_URL`
 - `SEED_ADMIN_EMAIL`
 - `SEED_ADMIN_PASSWORD`
 - `MOFANG_CLOUD_BASE_URL`
@@ -124,6 +146,14 @@ npm run lint
 - `MOFANG_CLOUD_API_SECRET`
 - `MOFANG_CLOUD_USE_MOCK`
 - `PAYMENT_CALLBACK_SECRET`
+
+未显式设置时的本地默认值：
+
+- `DATABASE_URL=file:./dev.db`
+- `AUTH_SECRET=replace-this-with-a-long-secret`
+- `IDC_FINANCE_ADMIN_BASE_URL=http://localhost:5177`
+- `MOFANG_CLOUD_USE_MOCK=true`
+- `PAYMENT_CALLBACK_SECRET=dev-callback-secret`
 
 ## 支付回调说明
 

@@ -29,6 +29,8 @@ import {
   TicketStatus,
 } from "@prisma/client";
 
+process.env.DATABASE_URL ??= "file:./dev.db";
+
 const db = new PrismaClient();
 
 async function main() {
