@@ -1,0 +1,265 @@
+package domain
+
+type OrderStatus string
+
+const (
+	OrderStatusPending   OrderStatus = "PENDING"
+	OrderStatusActive    OrderStatus = "ACTIVE"
+	OrderStatusCompleted OrderStatus = "COMPLETED"
+	OrderStatusCancelled OrderStatus = "CANCELLED"
+)
+
+type InvoiceStatus string
+
+const (
+	InvoiceStatusUnpaid   InvoiceStatus = "UNPAID"
+	InvoiceStatusPaid     InvoiceStatus = "PAID"
+	InvoiceStatusRefunded InvoiceStatus = "REFUNDED"
+)
+
+type ServiceStatus string
+
+const (
+	ServiceStatusPending    ServiceStatus = "PENDING"
+	ServiceStatusActive     ServiceStatus = "ACTIVE"
+	ServiceStatusSuspended  ServiceStatus = "SUSPENDED"
+	ServiceStatusTerminated ServiceStatus = "TERMINATED"
+)
+
+type RefundStatus string
+
+const (
+	RefundStatusCompleted RefundStatus = "COMPLETED"
+)
+
+type PaymentStatus string
+
+const (
+	PaymentStatusCompleted PaymentStatus = "COMPLETED"
+)
+
+type OrderListFilter struct {
+	Page        int     `json:"page"`
+	Limit       int     `json:"limit"`
+	Sort        string  `json:"sort"`
+	Order       string  `json:"order"`
+	Status      string  `json:"status"`
+	OrderNo     string  `json:"orderNo"`
+	StartTime   string  `json:"startTime"`
+	EndTime     string  `json:"endTime"`
+	Amount      float64 `json:"amount"`
+	HasAmount   bool    `json:"hasAmount"`
+	CustomerID  int64   `json:"customerId"`
+	Payment     string  `json:"payment"`
+	PayStatus   string  `json:"payStatus"`
+	ProductName string  `json:"productName"`
+}
+
+type InvoiceListFilter struct {
+	Page         int    `json:"page"`
+	Limit        int    `json:"limit"`
+	Sort         string `json:"sort"`
+	Order        string `json:"order"`
+	Status       string `json:"status"`
+	InvoiceNo    string `json:"invoiceNo"`
+	OrderNo      string `json:"orderNo"`
+	ProductName  string `json:"productName"`
+	BillingCycle string `json:"billingCycle"`
+	CustomerID   int64  `json:"customerId"`
+}
+
+type ServiceListFilter struct {
+	Page              int    `json:"page"`
+	Limit             int    `json:"limit"`
+	Sort              string `json:"sort"`
+	Order             string `json:"order"`
+	Status            string `json:"status"`
+	ProviderType      string `json:"providerType"`
+	ProviderAccountID int64  `json:"providerAccountId"`
+	SyncStatus        string `json:"syncStatus"`
+	Keyword           string `json:"keyword"`
+}
+
+type ServiceConfigSelection struct {
+	Code       string  `json:"code"`
+	Name       string  `json:"name"`
+	Value      string  `json:"value"`
+	ValueLabel string  `json:"valueLabel"`
+	PriceDelta float64 `json:"priceDelta"`
+}
+
+type ServiceResourceSnapshot struct {
+	RegionName      string `json:"regionName"`
+	ZoneName        string `json:"zoneName"`
+	Hostname        string `json:"hostname"`
+	OperatingSystem string `json:"operatingSystem"`
+	LoginUsername   string `json:"loginUsername"`
+	PasswordHint    string `json:"passwordHint"`
+	SecurityGroup   string `json:"securityGroup"`
+	CPUCores        int    `json:"cpuCores"`
+	MemoryGB        int    `json:"memoryGB"`
+	SystemDiskGB    int    `json:"systemDiskGB"`
+	DataDiskGB      int    `json:"dataDiskGB"`
+	BandwidthMbps   int    `json:"bandwidthMbps"`
+	PublicIPv4      string `json:"publicIpv4"`
+	PublicIPv6      string `json:"publicIpv6"`
+}
+
+type ServiceActionParams struct {
+	ImageName string
+	Password  string
+}
+
+type PendingOrderUpdate struct {
+	ProductName  string   `json:"productName"`
+	BillingCycle string   `json:"billingCycle"`
+	Amount       *float64 `json:"amount"`
+	DueAt        string   `json:"dueAt"`
+	Status       string   `json:"status"`
+}
+
+type UnpaidInvoiceUpdate struct {
+	ProductName  string   `json:"productName"`
+	BillingCycle string   `json:"billingCycle"`
+	Amount       *float64 `json:"amount"`
+	DueAt        string   `json:"dueAt"`
+	Status       string   `json:"status"`
+}
+
+type ManualServiceUpdate struct {
+	ProviderType       string `json:"providerType"`
+	ProviderAccountID  *int64 `json:"providerAccountId"`
+	ProviderResourceID string `json:"providerResourceId"`
+	RegionName         string `json:"regionName"`
+	IPAddress          string `json:"ipAddress"`
+	NextDueAt          string `json:"nextDueAt"`
+	Status             string `json:"status"`
+	SyncStatus         string `json:"syncStatus"`
+	SyncMessage        string `json:"syncMessage"`
+}
+
+type ServiceChangeOrderInput struct {
+	ActionName   string         `json:"actionName"`
+	Title        string         `json:"title"`
+	BillingCycle string         `json:"billingCycle"`
+	Amount       float64        `json:"amount"`
+	Reason       string         `json:"reason"`
+	Payload      map[string]any `json:"payload"`
+}
+
+type ServiceChangeOrder struct {
+	ID           int64          `json:"id"`
+	ServiceID    int64          `json:"serviceId"`
+	OrderID      int64          `json:"orderId"`
+	InvoiceID    int64          `json:"invoiceId"`
+	ActionName   string         `json:"actionName"`
+	Title        string         `json:"title"`
+	Amount       float64        `json:"amount"`
+	Status       string         `json:"status"`
+	Reason       string         `json:"reason"`
+	BillingCycle string         `json:"billingCycle"`
+	Payload      map[string]any `json:"payload"`
+	PaidAt       string         `json:"paidAt"`
+	RefundedAt   string         `json:"refundedAt"`
+	CreatedAt    string         `json:"createdAt"`
+	UpdatedAt    string         `json:"updatedAt"`
+}
+
+type ServiceProvisioningUpdate struct {
+	ProviderAccountID  int64                    `json:"providerAccountId"`
+	ProviderType       string                   `json:"providerType"`
+	ProviderResourceID string                   `json:"providerResourceId"`
+	RegionName         string                   `json:"regionName"`
+	IPAddress          string                   `json:"ipAddress"`
+	Status             ServiceStatus            `json:"status"`
+	SyncStatus         string                   `json:"syncStatus"`
+	SyncMessage        string                   `json:"syncMessage"`
+	LastAction         string                   `json:"lastAction"`
+	ResourceSnapshot   ServiceResourceSnapshot  `json:"resourceSnapshot"`
+	Configuration      []ServiceConfigSelection `json:"configuration"`
+}
+
+type Order struct {
+	ID                int64                    `json:"id"`
+	OrderNo           string                   `json:"orderNo"`
+	CustomerID        int64                    `json:"customerId"`
+	CustomerName      string                   `json:"customerName"`
+	ProductID         int64                    `json:"productId"`
+	ProductName       string                   `json:"productName"`
+	ProductType       string                   `json:"productType"`
+	AutomationType    string                   `json:"automationType"`
+	ProviderAccountID int64                    `json:"providerAccountId"`
+	BillingCycle      string                   `json:"billingCycle"`
+	Amount            float64                  `json:"amount"`
+	Status            OrderStatus              `json:"status"`
+	Payment           string                   `json:"payment"`
+	PayStatus         string                   `json:"payStatus"`
+	Configuration     []ServiceConfigSelection `json:"configuration"`
+	ResourceSnapshot  ServiceResourceSnapshot  `json:"resourceSnapshot"`
+	CreatedAt         string                   `json:"createdAt"`
+}
+
+type Invoice struct {
+	ID           int64         `json:"id"`
+	InvoiceNo    string        `json:"invoiceNo"`
+	OrderID      int64         `json:"orderId"`
+	OrderNo      string        `json:"orderNo"`
+	CustomerID   int64         `json:"customerId"`
+	ProductName  string        `json:"productName"`
+	TotalAmount  float64       `json:"totalAmount"`
+	Status       InvoiceStatus `json:"status"`
+	DueAt        string        `json:"dueAt"`
+	PaidAt       string        `json:"paidAt,omitempty"`
+	BillingCycle string        `json:"billingCycle"`
+}
+
+type ServiceRecord struct {
+	ID                 int64                    `json:"id"`
+	ServiceNo          string                   `json:"serviceNo"`
+	OrderID            int64                    `json:"orderId"`
+	InvoiceID          int64                    `json:"invoiceId"`
+	CustomerID         int64                    `json:"customerId"`
+	ProductName        string                   `json:"productName"`
+	ProviderType       string                   `json:"providerType"`
+	ProviderAccountID  int64                    `json:"providerAccountId"`
+	ProviderResourceID string                   `json:"providerResourceId"`
+	RegionName         string                   `json:"regionName"`
+	IPAddress          string                   `json:"ipAddress"`
+	Status             ServiceStatus            `json:"status"`
+	SyncStatus         string                   `json:"syncStatus"`
+	SyncMessage        string                   `json:"syncMessage"`
+	NextDueAt          string                   `json:"nextDueAt"`
+	LastAction         string                   `json:"lastAction"`
+	LastSyncAt         string                   `json:"lastSyncAt"`
+	UpdatedAt          string                   `json:"updatedAt"`
+	Configuration      []ServiceConfigSelection `json:"configuration"`
+	ResourceSnapshot   ServiceResourceSnapshot  `json:"resourceSnapshot"`
+	CreatedAt          string                   `json:"createdAt"`
+}
+
+type RefundRecord struct {
+	ID         int64        `json:"id"`
+	RefundNo   string       `json:"refundNo"`
+	InvoiceID  int64        `json:"invoiceId"`
+	OrderID    int64        `json:"orderId"`
+	CustomerID int64        `json:"customerId"`
+	Amount     float64      `json:"amount"`
+	Reason     string       `json:"reason"`
+	Status     RefundStatus `json:"status"`
+	CreatedAt  string       `json:"createdAt"`
+}
+
+type PaymentRecord struct {
+	ID         int64         `json:"id"`
+	PaymentNo  string        `json:"paymentNo"`
+	InvoiceID  int64         `json:"invoiceId"`
+	OrderID    int64         `json:"orderId"`
+	CustomerID int64         `json:"customerId"`
+	Channel    string        `json:"channel"`
+	TradeNo    string        `json:"tradeNo"`
+	Amount     float64       `json:"amount"`
+	Source     string        `json:"source"`
+	Status     PaymentStatus `json:"status"`
+	Operator   string        `json:"operator"`
+	PaidAt     string        `json:"paidAt"`
+}

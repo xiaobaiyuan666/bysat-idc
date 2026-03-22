@@ -1,0 +1,120 @@
+<script setup lang="ts">
+import { computed, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
+import { ElMessage } from "element-plus";
+import { localeOptions, pickLabel } from "@/locales";
+import { useLocaleStore, usePermissionStore, useUserStore } from "@/store";
+
+const router = useRouter();
+const localeStore = useLocaleStore();
+const userStore = useUserStore();
+const permissionStore = usePermissionStore();
+const loading = ref(false);
+
+const form = reactive({
+  username: "admin",
+  password: "Admin123!"
+});
+
+const copy = computed(() => ({
+  heroTitle: pickLabel(localeStore.locale, "把财务、服务、工单和客户运营放在同一张后台里。", "Run finance, services, tickets, and customers from one admin console."),
+  heroSubtitle: pickLabel(
+    localeStore.locale,
+    "这套后台现在已经接入 MySQL 真数据链路，工作台、客户、订单、账单、服务和统计报表都统一在同一套运营壳层里。",
+    "This admin now runs on real MySQL data, with workbench, customers, orders, invoices, services, and reports unified in one shell."
+  ),
+  featureA: pickLabel(localeStore.locale, "运营工作台", "Operations Workbench"),
+  featureADesc: pickLabel(localeStore.locale, "集中处理实名认证、逾期账单、到期服务和工单待办。", "Handle identity review, overdue invoices, expiring services, and pending tickets in one place."),
+  featureB: pickLabel(localeStore.locale, "财务主链", "Billing Chain"),
+  featureBDesc: pickLabel(localeStore.locale, "订单、账单、收款、退款和服务状态回写已经打通。", "Orders, invoices, payments, refunds, and service status are linked together."),
+  featureC: pickLabel(localeStore.locale, "公有云业务中心", "Cloud Operations"),
+  featureCDesc: pickLabel(localeStore.locale, "商品配置、资源快照、实例动作和服务工作台已统一进后台视图。", "Product setup, resource snapshots, instance actions, and service workbenches are unified."),
+  loginTitle: pickLabel(localeStore.locale, "登录后台", "Admin Login"),
+  loginSubtitle: pickLabel(localeStore.locale, "使用管理员账号进入客户、财务和服务运营工作台。", "Use the administrator account to enter the operations console."),
+  defaultAccount: pickLabel(localeStore.locale, "默认账号", "Default account"),
+  username: pickLabel(localeStore.locale, "用户名", "Username"),
+  password: pickLabel(localeStore.locale, "密码", "Password"),
+  submit: pickLabel(localeStore.locale, "进入后台", "Enter Admin"),
+  success: pickLabel(localeStore.locale, "登录成功", "Login successful"),
+  failed: pickLabel(localeStore.locale, "登录失败，请确认 API 服务已经启动。", "Login failed. Confirm the API service is running.")
+}));
+
+async function handleSubmit() {
+  loading.value = true;
+  try {
+    await userStore.login(form);
+    await permissionStore.load();
+    ElMessage.success(copy.value.success);
+    router.push("/workbench");
+  } catch {
+    ElMessage.error(copy.value.failed);
+  } finally {
+    loading.value = false;
+  }
+}
+</script>
+
+<template>
+  <div class="login-shell">
+    <div class="page-card login-card">
+      <section class="login-hero">
+        <div class="login-hero__toolbar">
+          <div class="login-hero__eyebrow">IDC Operation Center</div>
+          <el-button-group>
+            <el-button
+              v-for="item in localeOptions"
+              :key="item.value"
+              size="small"
+              :type="localeStore.locale === item.value ? 'primary' : 'default'"
+              @click="localeStore.setLocale(item.value)"
+            >
+              {{ item.label }}
+            </el-button>
+          </el-button-group>
+        </div>
+        <h1 class="login-hero__title">{{ copy.heroTitle }}</h1>
+        <p class="login-hero__subtitle">{{ copy.heroSubtitle }}</p>
+
+        <div class="login-feature-list">
+          <div class="login-feature">
+            <div class="login-feature__title">{{ copy.featureA }}</div>
+            <div class="login-feature__desc">{{ copy.featureADesc }}</div>
+          </div>
+          <div class="login-feature">
+            <div class="login-feature__title">{{ copy.featureB }}</div>
+            <div class="login-feature__desc">{{ copy.featureBDesc }}</div>
+          </div>
+          <div class="login-feature">
+            <div class="login-feature__title">{{ copy.featureC }}</div>
+            <div class="login-feature__desc">{{ copy.featureCDesc }}</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="login-form">
+        <div class="login-form__head">
+          <div class="login-form__title">{{ copy.loginTitle }}</div>
+          <div class="login-form__subtitle">{{ copy.loginSubtitle }}</div>
+        </div>
+
+        <div class="login-tips">
+          <strong>{{ copy.defaultAccount }}</strong><br />
+          {{ copy.username }}：`admin`<br />
+          {{ copy.password }}：`Admin123!`
+        </div>
+
+        <el-form label-position="top">
+          <el-form-item :label="copy.username">
+            <el-input v-model="form.username" size="large" />
+          </el-form-item>
+          <el-form-item :label="copy.password">
+            <el-input v-model="form.password" type="password" size="large" show-password />
+          </el-form-item>
+          <el-button type="primary" size="large" :loading="loading" style="width: 100%" @click="handleSubmit">
+            {{ copy.submit }}
+          </el-button>
+        </el-form>
+      </section>
+    </div>
+  </div>
+</template>

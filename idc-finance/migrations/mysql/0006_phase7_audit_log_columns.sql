@@ -1,0 +1,4 @@
+ALTER TABLE audit_logs
+  ADD COLUMN actor VARCHAR(128) NOT NULL DEFAULT '' AFTER actor_id,
+  ADD COLUMN target VARCHAR(128) NOT NULL DEFAULT '' AFTER target_id,
+  ADD COLUMN description VARCHAR(255) NOT NULL DEFAULT '' AFTER request_id;

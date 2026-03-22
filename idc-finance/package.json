@@ -1,0 +1,25 @@
+{
+  "name": "idc-finance-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/admin-web",
+    "apps/portal-web",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-go.ps1 run ./apps/api/cmd/server",
+    "dev:api:mysql": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev-api-mysql.ps1",
+    "db:migrate:mysql": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/mysql-tool.ps1 --mode migrate",
+    "db:seed:mysql": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/mysql-tool.ps1 --mode seed",
+    "db:prepare:mysql": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/mysql-tool.ps1 --mode all",
+    "dev:admin": "npm run dev --workspace apps/admin-web",
+    "dev:portal": "npm run dev --workspace apps/portal-web",
+    "build:admin": "npm run build --workspace apps/admin-web",
+    "build:portal": "npm run build --workspace apps/portal-web"
+  },
+  "devDependencies": {
+    "unplugin-auto-import": "^21.0.0",
+    "unplugin-vue-components": "^31.0.0"
+  }
+}
