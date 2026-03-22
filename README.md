@@ -46,4 +46,6 @@ npm run dev:portal
 3. [`docs/current-state.md`](/Users/a1/Documents/codex/bysat-idc/docs/current-state.md)
 4. [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)
 5. [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)
-6. [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md)
+6. [`docs/cross-device-collaboration.md`](/Users/a1/Documents/codex/bysat-idc/docs/cross-device-collaboration.md)
+7. [`docs/active-handoff.md`](/Users/a1/Documents/codex/bysat-idc/docs/active-handoff.md)
+8. [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md)

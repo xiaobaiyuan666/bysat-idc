@@ -24,8 +24,10 @@
 4. 阅读 [`docs/current-state.md`](/Users/a1/Documents/codex/bysat-idc/docs/current-state.md)
 5. 阅读 [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)
 6. 阅读 [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)
-7. 再进入 [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md) 看运行和模块说明
-8. 最后根据本次任务，再去读对应模块代码和相关文档
+7. 阅读 [`docs/cross-device-collaboration.md`](/Users/a1/Documents/codex/bysat-idc/docs/cross-device-collaboration.md)
+8. 阅读 [`docs/active-handoff.md`](/Users/a1/Documents/codex/bysat-idc/docs/active-handoff.md)
+9. 再进入 [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md) 看运行和模块说明
+10. 最后根据本次任务，再去读对应模块代码和相关文档
 
 ## 当前约定
 

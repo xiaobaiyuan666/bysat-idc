@@ -70,6 +70,10 @@
 
 - [`docs/project-continuity.md`](/Users/a1/Documents/codex/bysat-idc/docs/project-continuity.md)：如何恢复开发
 - [`docs/current-state.md`](/Users/a1/Documents/codex/bysat-idc/docs/current-state.md)：当前阶段状态
+- [`docs/active-handoff.md`](/Users/a1/Documents/codex/bysat-idc/docs/active-handoff.md)：当前交接面板与下一步建议
+- [`docs/cross-device-collaboration.md`](/Users/a1/Documents/codex/bysat-idc/docs/cross-device-collaboration.md)：跨端协作制度
+- [`docs/handoff-template.md`](/Users/a1/Documents/codex/bysat-idc/docs/handoff-template.md)：阶段性交接模板
+- [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)：新设备环境恢复与启动说明
 - [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)：注释和同步规则
 - [`docs/mofang-integration.md`](/Users/a1/Documents/codex/bysat-idc/docs/mofang-integration.md)：魔方云接口摘录
 - [`docs/mofang-portal-sync.md`](/Users/a1/Documents/codex/bysat-idc/docs/mofang-portal-sync.md)：同步到门户的业务说明

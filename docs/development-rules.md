@@ -54,6 +54,8 @@
 
 - [`docs/current-state.md`](/Users/a1/Documents/codex/bysat-idc/docs/current-state.md)
 - [`docs/project-map.md`](/Users/a1/Documents/codex/bysat-idc/docs/project-map.md)
+- [`docs/active-handoff.md`](/Users/a1/Documents/codex/bysat-idc/docs/active-handoff.md)
+- [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)
 - [`README.md`](/Users/a1/Documents/codex/bysat-idc/README.md)
 
 ## 续开发规则
@@ -75,3 +77,5 @@
 - 不要使用 git submodule 来保存这种上下文，普通文档文件就够了。
 - 敏感配置放本地 `.env.local`，不要进仓库。
 - 重大整理、架构切换、接口对接完成后，要有清晰提交信息。
+- 跨设备续开发以“已提交并已推送”为准，未 push 的工作不能默认其他端可见。
+- 每次结束一个可识别开发阶段前，优先检查 [`docs/active-handoff.md`](/Users/a1/Documents/codex/bysat-idc/docs/active-handoff.md) 是否需要更新。

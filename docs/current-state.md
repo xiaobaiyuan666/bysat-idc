@@ -28,6 +28,12 @@
 - MySQL 本地初始化说明已经改成通用版，见 [`idc-finance/docs/mysql-setup.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/docs/mysql-setup.md)。
 - MySQL 演示种子会覆盖客户、订单、账单、支付、服务、Provider 账号、同步日志、资源明细和自动化任务，便于直接进入联调状态。
 
+### 跨端协作规范
+
+- 仓库级协作规则已经固定在 [`AGENTS.md`](/Users/a1/Documents/codex/bysat-idc/AGENTS.md)。
+- 跨端续开发协议见 [`docs/cross-device-collaboration.md`](/Users/a1/Documents/codex/bysat-idc/docs/cross-device-collaboration.md)。
+- 当前交接面板见 [`docs/active-handoff.md`](/Users/a1/Documents/codex/bysat-idc/docs/active-handoff.md)。
+
 ### 后台与 VNC
 
 - 服务详情中的 VNC 能力已经迁移到新后台。
