@@ -60,12 +60,22 @@ export interface CustomerIdentityOverview extends IdentityRecord {
 }
 
 export interface RelatedItem {
+  id?: number;
+  serviceId?: number;
+  invoiceId?: number;
+  ticketId?: number;
   no?: string;
   name?: string;
   status?: string;
   amount?: string;
   dueAt?: string;
   updatedAt?: string;
+  billingCycle?: string;
+  providerType?: string;
+  providerResourceId?: string;
+  regionName?: string;
+  ipAddress?: string;
+  description?: string;
   serviceNo?: string;
   productName?: string;
   nextDueAt?: string;
@@ -407,6 +417,17 @@ export interface MofangInstanceSummary {
   consoleUrl?: string;
   expiresAt?: string;
   raw?: Record<string, unknown>;
+}
+
+export interface MofangInstanceDetail extends MofangInstanceSummary {}
+
+export interface MofangInstanceActionResponse {
+  ok: boolean;
+  action: string;
+  remoteId: string;
+  status: string;
+  message: string;
+  response?: Record<string, unknown>;
 }
 
 export interface MofangSyncItem {
@@ -1157,6 +1178,37 @@ export async function fetchMofangInstances(accountId?: number | string) {
   const query = accountId !== undefined ? `?accountId=${encodeURIComponent(String(accountId))}` : "";
   const { data } = await http.get(`/providers/mofang/instances${query}`);
   return data.data as { items: MofangInstanceSummary[]; total: number };
+}
+
+export async function fetchMofangInstanceDetail(id: number | string, accountId?: number | string) {
+  const query = accountId !== undefined ? `?accountId=${encodeURIComponent(String(accountId))}` : "";
+  const { data } = await http.get(`/providers/mofang/instances/${id}${query}`);
+  return data.data as MofangInstanceDetail;
+}
+
+export async function runMofangInstanceAction(
+  id: number | string,
+  action:
+    | "suspend"
+    | "power-on"
+    | "power-off"
+    | "reboot"
+    | "hard-reboot"
+    | "hard-power-off"
+    | "reset-password"
+    | "reinstall"
+    | "unsuspend"
+    | "get-vnc"
+    | "rescue-start"
+    | "rescue-stop"
+    | "lock"
+    | "unlock",
+  payload?: { imageName?: string; password?: string },
+  accountId?: number | string
+) {
+  const query = accountId !== undefined ? `?accountId=${encodeURIComponent(String(accountId))}` : "";
+  const { data } = await http.post(`/providers/mofang/instances/${id}/actions/${action}${query}`, payload ?? {});
+  return data.data as MofangInstanceActionResponse;
 }
 
 export async function pullMofangSync(payload?: {

@@ -1,9 +1,11 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
 **/node_modules/
-/.pnp
+**/coverage/
+**/dist/
+**/build/
+**/.next/
+
+.DS_Store
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -11,26 +13,24 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
-**/coverage/
 .playwright-cli/
 .tmp-playwright-env/
 playwrightenv/
 output/
 
-# next.js
-/.next/
-/out/
-**/.next/
+*.log
+*.err
+*.out
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# production
-/build
-**/dist/
-**/build/
+.env*
+.vercel
+.codex-dev/
+*.tsbuildinfo
 
-# misc
-.DS_Store
 *.pem
 *.zip
 *.db
@@ -45,42 +45,16 @@ output/
 *.tmp
 *.sst
 *.bin
+*.test
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-*.log
-*.err
-*.out
-
-# env files (can opt-in for committing if needed)
-.env*
-.codex-dev/
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-/src/generated/prisma
-
-# local temp and scan artifacts
 tmp-*
 tmp_*
 scan_*.js
-legacy-install-session.*
-legacy-mofang-server*.log
-mysql57-legacy-init*.log
 frontend-dev.*
 backend-dev.*
 api-dev.log
-dev.db
 
-# generated source artifacts in the rebuilt Go/Vue workspace
+/idc-finance/server
 idc-finance/apps/admin-web/src/**/*.js
 idc-finance/apps/admin-web/src/**/*.js.map
 idc-finance/apps/portal-web/src/**/*.js

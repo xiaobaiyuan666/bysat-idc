@@ -52,13 +52,22 @@ type Identity struct {
 }
 
 type RelatedItem struct {
-	No          string `json:"no"`
-	Name        string `json:"name"`
-	Status      string `json:"status"`
-	Amount      string `json:"amount,omitempty"`
-	DueAt       string `json:"dueAt,omitempty"`
-	UpdatedAt   string `json:"updatedAt,omitempty"`
-	Description string `json:"description,omitempty"`
+	ID                 int64  `json:"id"`
+	ServiceID          int64  `json:"serviceId,omitempty"`
+	InvoiceID          int64  `json:"invoiceId,omitempty"`
+	TicketID           int64  `json:"ticketId,omitempty"`
+	No                 string `json:"no"`
+	Name               string `json:"name"`
+	Status             string `json:"status"`
+	Amount             string `json:"amount,omitempty"`
+	DueAt              string `json:"dueAt,omitempty"`
+	UpdatedAt          string `json:"updatedAt,omitempty"`
+	Description        string `json:"description,omitempty"`
+	ProviderType       string `json:"providerType,omitempty"`
+	ProviderResourceID string `json:"providerResourceId,omitempty"`
+	RegionName         string `json:"regionName,omitempty"`
+	IPAddress          string `json:"ipAddress,omitempty"`
+	BillingCycle       string `json:"billingCycle,omitempty"`
 }
 
 type Customer struct {

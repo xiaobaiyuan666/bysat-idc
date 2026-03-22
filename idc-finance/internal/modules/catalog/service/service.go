@@ -177,7 +177,7 @@ func (service *Service) SyncUpstream(
 			return domain.Product{}, false, fmt.Errorf("未配置上游财务地址")
 		}
 		if !health.Connected {
-			return domain.Product{}, false, fmt.Errorf(health.Message)
+			return domain.Product{}, false, fmt.Errorf("%s", health.Message)
 		}
 		if mapping.RemoteProductCode == "" {
 			return domain.Product{}, false, fmt.Errorf("请先填写远端商品编码")
@@ -299,7 +299,10 @@ func (service *Service) ImportUpstreamProducts(
 		return dto.ImportUpstreamProductsResponse{}, fmt.Errorf("当前接口账户未启用上游财务")
 	}
 	if !health.Connected {
-		return dto.ImportUpstreamProductsResponse{}, fmt.Errorf(firstNonEmpty(strings.TrimSpace(health.Message), "上游财务连接失败"))
+		return dto.ImportUpstreamProductsResponse{}, fmt.Errorf(
+			"%s",
+			firstNonEmpty(strings.TrimSpace(health.Message), "上游财务连接失败"),
+		)
 	}
 
 	groups, err := service.provider.ListUpstreamProducts(request.ProviderAccountID)

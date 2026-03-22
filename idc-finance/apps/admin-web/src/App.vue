@@ -6,7 +6,7 @@ import Layout from "./layout/index.vue";
 
 const route = useRoute();
 const localeStore = useLocaleStore();
-const useLayout = computed(() => route.path !== "/login");
+const useLayout = computed(() => route.path !== "/login" && route.meta?.hideLayout !== true);
 
 watchEffect(() => {
   document.documentElement.lang = localeStore.locale;

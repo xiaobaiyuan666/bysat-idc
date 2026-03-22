@@ -1,57 +1,13 @@
 {
-  "name": "idc-finance",
-  "version": "0.1.0",
+  "name": "wuqiongyun-idc",
   "private": true,
-  "overrides": {
-    "@prisma/config": {
-      "effect": "3.20.0"
-    }
-  },
   "scripts": {
-    "dev": "next dev",
-    "dev:backend": "next dev",
-    "dev:all": "sh ./scripts/dev-serve.sh all",
-    "dev:all:stop": "sh ./scripts/dev-down.sh all",
-    "dev:all:status": "sh ./scripts/dev-status.sh all",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint src scripts eslint.config.mjs",
-    "db:push": "tsx scripts/db-push.ts",
-    "db:seed": "tsx scripts/seed.ts",
-    "db:reset": "tsx scripts/db-reset.ts",
-    "db:studio": "prisma studio",
-    "postinstall": "prisma generate"
-  },
-  "dependencies": {
-    "@novnc/novnc": "^1.6.0",
-    "@prisma/client": "^6.19.2",
-    "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.8.0",
-    "clsx": "^2.1.1",
-    "date-fns": "^4.1.0",
-    "jose": "^6.2.1",
-    "lucide-react": "^0.577.0",
-    "next": "16.2.0",
-    "playwright": "^1.58.2",
-    "prisma": "^6.19.2",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "recharts": "^3.8.0",
-    "tailwind-merge": "^3.5.0",
-    "ws": "^8.19.0",
-    "zod": "^4.3.6"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "@types/ws": "^8.18.1",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.0",
-    "tailwindcss": "^4",
-    "tsx": "^4.21.0",
-    "typescript": "^5"
+    "dev:api": "npm run dev:api:unix --prefix idc-finance",
+    "dev:api:mysql": "npm run dev:api:mysql:unix --prefix idc-finance",
+    "dev:admin": "npm run dev:admin --prefix idc-finance",
+    "dev:portal": "npm run dev:portal --prefix idc-finance",
+    "build:admin": "npm run build:admin --prefix idc-finance",
+    "build:portal": "npm run build:portal --prefix idc-finance",
+    "db:prepare:mysql": "npm run db:prepare:mysql:unix --prefix idc-finance"
   }
 }

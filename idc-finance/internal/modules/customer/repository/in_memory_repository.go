@@ -365,11 +365,16 @@ func (repository *MemoryRepository) ListServiceItems(customerID int64) []domain.
 	}
 	return []domain.RelatedItem{
 		{
-			No:          "SRV-DEMO-0001",
-			Name:        "弹性云主机 CN2 标准型",
-			Status:      "ACTIVE",
-			DueAt:       "2026-04-20",
-			Description: "后续接入真实服务模块",
+			ID:           1,
+			ServiceID:    1,
+			No:           "SRV-DEMO-0001",
+			Name:         "弹性云主机 CN2 标准型",
+			Status:       "ACTIVE",
+			DueAt:        "2026-04-20",
+			Description:  "后续接入真实服务模块",
+			ProviderType: "MOFANG_CLOUD",
+			RegionName:   "华东 1",
+			IPAddress:    "203.0.113.10",
 		},
 	}
 }
@@ -380,11 +385,14 @@ func (repository *MemoryRepository) ListInvoiceItems(customerID int64) []domain.
 	}
 	return []domain.RelatedItem{
 		{
-			No:     "INV-DEMO-0001",
-			Name:   "云主机新购账单",
-			Status: "UNPAID",
-			Amount: "199.00",
-			DueAt:  "2026-03-30",
+			ID:           1,
+			InvoiceID:    1,
+			No:           "INV-DEMO-0001",
+			Name:         "云主机新购账单",
+			Status:       "UNPAID",
+			Amount:       "199.00",
+			DueAt:        "2026-03-30",
+			BillingCycle: "monthly",
 		},
 	}
 }
@@ -395,6 +403,8 @@ func (repository *MemoryRepository) ListTicketItems(customerID int64) []domain.R
 	}
 	return []domain.RelatedItem{
 		{
+			ID:        1,
+			TicketID:  1,
 			No:        "TIC-DEMO-0001",
 			Name:      "实例网络异常排查",
 			Status:    "PROCESSING",

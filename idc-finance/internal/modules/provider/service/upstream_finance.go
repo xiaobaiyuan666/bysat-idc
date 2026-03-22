@@ -504,7 +504,10 @@ func (service *Service) financeRequest(method, path string, data map[string]any)
 
 	root, _ := parsed.(map[string]any)
 	if status := pickInt(root, "status"); status != 0 && status != 200 {
-		return rawResponse{}, fmt.Errorf(firstNonEmpty(pickString(root, "msg", "message"), "上游财务返回业务错误"))
+		return rawResponse{}, fmt.Errorf(
+			"%s",
+			firstNonEmpty(pickString(root, "msg", "message"), "上游财务返回业务错误"),
+		)
 	}
 
 	return rawResponse{

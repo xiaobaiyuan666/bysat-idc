@@ -632,45 +632,23 @@ ON DUPLICATE KEY UPDATE
 }
 
 func (repository *MySQLRepository) ListServiceItems(customerID int64) []domain.RelatedItem {
-	return repository.listRelatedItems(`
-SELECT service_no, product_name, status,
-       '',
-       IFNULL(DATE_FORMAT(next_due_at, '%Y-%m-%d'), ''),
-       '',
-       CONCAT('操作类型：', IFNULL(last_action, ''))
+	rows, err := repository.db.Query(`
+SELECT
+  id,
+  service_no,
+  product_name,
+  status,
+  IFNULL(DATE_FORMAT(next_due_at, '%Y-%m-%d'), ''),
+  CONCAT('操作类型：', IFNULL(last_action, '')),
+  provider_type,
+  IFNULL(provider_resource_id, ''),
+  IFNULL(region_name, ''),
+  IFNULL(ip_address, '')
 FROM services
 WHERE customer_id = ?
 ORDER BY id DESC`, customerID)
-}
-
-func (repository *MySQLRepository) ListInvoiceItems(customerID int64) []domain.RelatedItem {
-	return repository.listRelatedItems(`
-SELECT invoice_no, product_name, status,
-       CAST(total_amount AS CHAR),
-       IFNULL(DATE_FORMAT(due_at, '%Y-%m-%d'), ''),
-       '',
-       ''
-FROM invoices
-WHERE customer_id = ?
-ORDER BY id DESC`, customerID)
-}
-
-func (repository *MySQLRepository) ListTicketItems(customerID int64) []domain.RelatedItem {
-	return repository.listRelatedItems(`
-SELECT ticket_no, title, status,
-       '',
-       '',
-       IFNULL(DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s'), ''),
-       ''
-FROM tickets
-WHERE customer_id = ?
-ORDER BY id DESC`, customerID)
-}
-
-func (repository *MySQLRepository) listRelatedItems(query string, customerID int64) []domain.RelatedItem {
-	rows, err := repository.db.Query(query, customerID)
 	if err != nil {
-		log.Printf("customer mysql list related items failed: %v", err)
+		log.Printf("customer mysql list service items failed: %v", err)
 		return nil
 	}
 	defer rows.Close()
@@ -678,10 +656,92 @@ func (repository *MySQLRepository) listRelatedItems(query string, customerID int
 	result := make([]domain.RelatedItem, 0)
 	for rows.Next() {
 		var item domain.RelatedItem
-		if err := rows.Scan(&item.No, &item.Name, &item.Status, &item.Amount, &item.DueAt, &item.UpdatedAt, &item.Description); err != nil {
-			log.Printf("customer mysql scan related item failed: %v", err)
+		if err := rows.Scan(
+			&item.ID,
+			&item.No,
+			&item.Name,
+			&item.Status,
+			&item.DueAt,
+			&item.Description,
+			&item.ProviderType,
+			&item.ProviderResourceID,
+			&item.RegionName,
+			&item.IPAddress,
+		); err != nil {
+			log.Printf("customer mysql scan service item failed: %v", err)
 			return result
 		}
+		item.ServiceID = item.ID
+		result = append(result, item)
+	}
+	return result
+}
+
+func (repository *MySQLRepository) ListInvoiceItems(customerID int64) []domain.RelatedItem {
+	rows, err := repository.db.Query(`
+SELECT
+  id,
+  invoice_no,
+  product_name,
+  status,
+  CAST(total_amount AS CHAR),
+  IFNULL(DATE_FORMAT(due_at, '%Y-%m-%d'), ''),
+  IFNULL(billing_cycle, '')
+FROM invoices
+WHERE customer_id = ?
+ORDER BY id DESC`, customerID)
+	if err != nil {
+		log.Printf("customer mysql list invoice items failed: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	result := make([]domain.RelatedItem, 0)
+	for rows.Next() {
+		var item domain.RelatedItem
+		if err := rows.Scan(
+			&item.ID,
+			&item.No,
+			&item.Name,
+			&item.Status,
+			&item.Amount,
+			&item.DueAt,
+			&item.BillingCycle,
+		); err != nil {
+			log.Printf("customer mysql scan invoice item failed: %v", err)
+			return result
+		}
+		item.InvoiceID = item.ID
+		result = append(result, item)
+	}
+	return result
+}
+
+func (repository *MySQLRepository) ListTicketItems(customerID int64) []domain.RelatedItem {
+	rows, err := repository.db.Query(`
+SELECT
+  id,
+  ticket_no,
+  title,
+  status,
+  IFNULL(DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s'), '')
+FROM tickets
+WHERE customer_id = ?
+ORDER BY id DESC`, customerID)
+	if err != nil {
+		log.Printf("customer mysql list ticket items failed: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	result := make([]domain.RelatedItem, 0)
+	for rows.Next() {
+		var item domain.RelatedItem
+		if err := rows.Scan(&item.ID, &item.No, &item.Name, &item.Status, &item.UpdatedAt); err != nil {
+			log.Printf("customer mysql scan ticket item failed: %v", err)
+			return result
+		}
+		item.TicketID = item.ID
 		result = append(result, item)
 	}
 	return result

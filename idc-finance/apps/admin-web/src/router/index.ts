@@ -36,7 +36,7 @@ router.beforeEach(async to => {
 });
 
 router.afterEach(to => {
-  if (to.meta?.title && to.path !== "/login") {
+  if (to.meta?.title && to.path !== "/login" && !to.meta?.hideLayout) {
     useMultiTagsStore().push({
       title: String(to.meta.title),
       titleEn: typeof to.meta.titleEn === "string" ? String(to.meta.titleEn) : undefined,

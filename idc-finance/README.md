@@ -1,6 +1,6 @@
-# IDC Finance Rebuild
+# 无穷云 IDC 系统 Workspace
 
-基于 `Go + Vue 3 + Element Plus + vue-pure-admin` 的 IDC 财务与云业务系统重建工程。
+基于 `Go + Vue 3 + Element Plus + vue-pure-admin` 的无穷云 IDC 财务与云业务系统工作区。
 
 ## 目录
 
@@ -28,11 +28,12 @@
 
 ## 启动
 
-如果要从仓库根目录统一拉起两套主项目：
+如果从仓库根目录启动：
 
 ```bash
-cd ..
-npm run dev:all
+npm run dev:api
+npm run dev:admin
+npm run dev:portal
 ```
 
 ### API
@@ -183,6 +184,7 @@ npm run db:prepare:mysql:unix
 - 支付记录与退款记录查看
 - 服务列表与服务详情工作台
 - 服务恢复、暂停、终止、重启、重装、重置密码
+- 服务详情直接打开 VNC 控制台
 - 魔方云健康检查
 - 魔方云实例列表、实例详情、远程动作
 - 魔方云实例拉取同步
