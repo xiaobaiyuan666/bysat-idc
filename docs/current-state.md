@@ -18,7 +18,15 @@
 
 - 根目录已经压缩为“说明文件 + 有效文档 + active workspace”模式。
 - 当前唯一业务工作区是 [`idc-finance`](/Users/a1/Documents/codex/bysat-idc/idc-finance)。
+- 当前 GitHub 仓库保持私有，主要用于当前阶段跨设备续开发和存放上下文资料。
 - 旧版后台、旧参考仓、legacy 大文档都已经从主线删除。
+- 当前已经补上可提交的环境模板 [`idc-finance/.env.example`](/Users/a1/Documents/codex/bysat-idc/idc-finance/.env.example)，真实配置继续放本地 `.env.local`。
+
+### 环境与演示数据
+
+- 新设备接手与本地启动步骤见 [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)。
+- MySQL 本地初始化说明已经改成通用版，见 [`idc-finance/docs/mysql-setup.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/docs/mysql-setup.md)。
+- MySQL 演示种子会覆盖客户、订单、账单、支付、服务、Provider 账号、同步日志、资源明细和自动化任务，便于直接进入联调状态。
 
 ### 后台与 VNC
 
@@ -53,6 +61,7 @@
 
 1. [`README.md`](/Users/a1/Documents/codex/bysat-idc/README.md)
 2. [`docs/project-map.md`](/Users/a1/Documents/codex/bysat-idc/docs/project-map.md)
-3. [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)
-4. [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md)
-5. 你本次任务对应的具体模块代码
+3. [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)
+4. [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)
+5. [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md)
+6. 你本次任务对应的具体模块代码

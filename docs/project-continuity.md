@@ -22,16 +22,19 @@
 2. 阅读根目录 [`README.md`](/Users/a1/Documents/codex/bysat-idc/README.md)
 3. 阅读 [`docs/project-map.md`](/Users/a1/Documents/codex/bysat-idc/docs/project-map.md)
 4. 阅读 [`docs/current-state.md`](/Users/a1/Documents/codex/bysat-idc/docs/current-state.md)
-5. 阅读 [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)
-6. 再进入 [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md) 看运行和模块说明
-7. 最后根据本次任务，再去读对应模块代码和相关文档
+5. 阅读 [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)
+6. 阅读 [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)
+7. 再进入 [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md) 看运行和模块说明
+8. 最后根据本次任务，再去读对应模块代码和相关文档
 
 ## 当前约定
 
 - 根目录只保留当前还会继续使用的主线工程和文档。
 - 当前唯一 active workspace 是 [`idc-finance`](/Users/a1/Documents/codex/bysat-idc/idc-finance)。
 - 与魔方云相关的补充资料保留在 [`docs`](/Users/a1/Documents/codex/bysat-idc/docs)。
+- 当前仓库保持私有，作为未完工阶段的主线开发和续开发存储。
 - 运行相关的本地敏感配置放在未提交的 `.env.local`，不要写进仓库文档。
+- `.env.local` 的来源是 [`idc-finance/.env.example`](/Users/a1/Documents/codex/bysat-idc/idc-finance/.env.example)，模板可以提交，真实配置不能提交。
 
 ## 每次开发结束前必须补哪些内容
 

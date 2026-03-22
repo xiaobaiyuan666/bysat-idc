@@ -1,42 +1,81 @@
 # MySQL 本地初始化
 
-当前这台机器已经完成本地 MySQL 安装，信息如下：
+这份文档只保留通用初始化步骤，不再记录某台机器的安装路径、账号密码或本地目录。
 
-- 安装目录：`C:\tools\mysql\mysql\current`
-- 数据目录：`C:\mysql-data\mysql\data`
-- 服务名：`MySQLIDC`
-- 端口：`3306`
-- 项目数据库：`idc_finance`
-- 项目账号：`idc_finance`
+真实 MySQL 凭据请放在未提交的 `.env.local` 中。
 
-## 常用命令
+## 建议版本
 
-查看服务状态：
+- MySQL `8.x`
+- 数据库字符集：`utf8mb4`
 
-```powershell
-Get-Service -Name MySQLIDC
+## 1. 创建数据库和项目账号
+
+下面是一个可直接改造的示例：
+
+```sql
+CREATE DATABASE IF NOT EXISTS idc_finance
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+
+CREATE USER IF NOT EXISTS 'idc_finance'@'%' IDENTIFIED BY 'change-me';
+GRANT ALL PRIVILEGES ON idc_finance.* TO 'idc_finance'@'%';
+FLUSH PRIVILEGES;
 ```
 
-连接 MySQL：
+如果你只允许本机连接，也可以把 `'%'` 改成 `'localhost'` 或 `'127.0.0.1'`。
 
-```powershell
-& "C:\tools\mysql\mysql\current\bin\mysql.exe" -u root -p
+## 2. 填写本地环境变量
+
+先复制模板：
+
+```bash
+cp .env.example .env.local
 ```
 
-使用项目脚本初始化数据库：
+然后把 `.env.local` 改成 MySQL 模式，例如：
 
-```powershell
-$env:MYSQL_DSN='idc_finance:IdcFinance!2026@tcp(127.0.0.1:3306)/idc_finance?parseTime=true&charset=utf8mb4'
+```env
+STORAGE_DRIVER=mysql
+STORAGE_STRICT=true
+MYSQL_DSN=idc_finance:change-me@tcp(127.0.0.1:3306)/idc_finance?parseTime=true&charset=utf8mb4
+```
+
+## 3. 执行迁移和演示数据
+
+在工作区目录执行：
+
+```bash
 npm run db:prepare:mysql
 ```
 
-用 MySQL 模式启动 API：
+如果你只想分开执行，也可以：
 
-```powershell
+```bash
+npm run db:migrate:mysql
+npm run db:seed:mysql
+```
+
+## 4. 以 MySQL 模式启动 API
+
+```bash
 npm run dev:api:mysql
 ```
 
+## 5. 初始化后的效果
+
+初始化完成后，MySQL 中会有一套可直接演示和联调的数据，覆盖：
+
+- 商品、价格矩阵、配置项、资源模板
+- 客户、联系人、实名状态
+- 工单
+- 订单、账单、支付、服务
+- Provider 账号
+- Provider 同步日志与资源明细
+- 自动化任务与改配单示例
+
 ## 说明
 
-- `.env.local` 已写入项目本地 MySQL DSN，且已被 `.gitignore` 忽略。
-- `STORAGE_STRICT=true` 已启用；如果 MySQL 连接失败，API 会直接退出，不再静默回退到内存仓储。
+- `.env.local` 已被 `.gitignore` 忽略，可以存放当前机器的真实 DSN。
+- `STORAGE_STRICT=true` 时，如果 MySQL 不可用，API 会直接退出，不再静默回退到内存仓储。
+- 如果只做页面开发或不需要持久化联调，可以改回 `STORAGE_DRIVER=memory`。

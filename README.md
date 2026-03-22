@@ -4,6 +4,8 @@
 
 这套系统现在统一命名为“无穷云 IDC 系统”，当前代码基线为 AI 生成并在此仓库内持续演进。
 
+当前仓库保持私有，用于在系统尚未开发完成前存放主线代码、续开发文档和演示资料。
+
 ## 当前入口
 
 - 后台：`http://localhost:5177`
@@ -27,6 +29,8 @@ npm run dev:portal
 
 也可以直接进入 [`idc-finance`](/Users/a1/Documents/codex/bysat-idc/idc-finance) 目录启动。
 
+如果是新设备第一次启动，先阅读 [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)，并按模板创建本地 `idc-finance/.env.local`。
+
 ## 说明
 
 - 根目录只保留当前开发还会继续用到的入口和说明文件
@@ -40,5 +44,6 @@ npm run dev:portal
 1. [`docs/project-continuity.md`](/Users/a1/Documents/codex/bysat-idc/docs/project-continuity.md)
 2. [`docs/project-map.md`](/Users/a1/Documents/codex/bysat-idc/docs/project-map.md)
 3. [`docs/current-state.md`](/Users/a1/Documents/codex/bysat-idc/docs/current-state.md)
-4. [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)
-5. [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md)
+4. [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)
+5. [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)
+6. [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md)

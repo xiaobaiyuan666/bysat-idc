@@ -8,6 +8,7 @@
 - `docs/project-continuity.md`
 - `docs/project-map.md`
 - `docs/current-state.md`
+- `docs/environment-setup.md`
 - `docs/development-rules.md`
 
 ## 目录
@@ -35,6 +36,8 @@
 - Phase 8：魔方云真实 Provider、实例拉取同步、资源落库、同步日志
 
 ## 启动
+
+如果是新设备第一次接手，先按 [`../docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md) 准备环境，再回来启动本工作区。
 
 如果从仓库根目录启动：
 
@@ -112,6 +115,18 @@ npm run dev:portal
 
 ## 环境变量
 
+推荐先复制模板：
+
+```bash
+cp .env.example .env.local
+```
+
+项目脚本只会自动加载本地的 `.env.local`。
+
+可提交模板文件：
+
+- [`.env.example`](/Users/a1/Documents/codex/bysat-idc/idc-finance/.env.example)
+
 核心配置：
 
 - `STORAGE_DRIVER=memory`
@@ -128,6 +143,21 @@ npm run dev:portal
 - `MOFANG_CLOUD_INSECURE_SKIP_VERIFY=true`
 - `MOFANG_CLOUD_LIST_PATH=/v1/clouds`
 - `MOFANG_CLOUD_INSTANCE_DETAIL_PATH=/v1/clouds/:id`
+
+财务上游配置：
+
+- `FINANCE_UPSTREAM_BASE_URL`
+- `FINANCE_UPSTREAM_USERNAME`
+- `FINANCE_UPSTREAM_PASSWORD`
+- `FINANCE_UPSTREAM_SOURCE_NAME`
+- `FINANCE_UPSTREAM_INSECURE_SKIP_VERIFY`
+
+说明：
+
+- `.env.example` 可以提交，用来保存字段说明和默认模板。
+- `.env.local` 不能提交，用来保存当前机器的真实账号、密码和地址。
+- 如果只需要快速看界面或继续开发前端，优先使用 `STORAGE_DRIVER=memory`。
+- 如果需要联调持久化、报表、Provider 同步、资源明细，切换到 `STORAGE_DRIVER=mysql`。
 
 当 `STORAGE_DRIVER=mysql` 且 `MYSQL_DSN` 可用时：
 
@@ -172,6 +202,8 @@ npm run db:prepare:mysql:unix
 本机 MySQL 安装说明见：
 
 - `docs/mysql-setup.md`
+
+初始化完成后会得到一套完整的演示数据，用于后台、用户端、报表和 Provider 资源联调。
 
 ## 当前可用范围
 

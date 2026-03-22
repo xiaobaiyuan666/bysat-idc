@@ -27,6 +27,8 @@ yarn-error.log*
 .pnpm-debug.log*
 
 .env*
+!.env.example
+!**/.env.example
 .vercel
 .codex-dev/
 *.tsbuildinfo
