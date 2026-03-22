@@ -2,6 +2,14 @@
 
 基于 `Go + Vue 3 + Element Plus + vue-pure-admin` 的无穷云 IDC 财务与云业务系统工作区。
 
+如果你是中断后重新接手这个项目，先回到根目录阅读：
+
+- `README.md`
+- `docs/project-continuity.md`
+- `docs/project-map.md`
+- `docs/current-state.md`
+- `docs/development-rules.md`
+
 ## 目录
 
 - `apps/api`：Go API 服务
