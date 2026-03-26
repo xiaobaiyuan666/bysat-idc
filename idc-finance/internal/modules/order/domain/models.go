@@ -110,6 +110,8 @@ type ServiceListFilter struct {
 	Sort              string `json:"sort"`
 	Order             string `json:"order"`
 	Status            string `json:"status"`
+	CustomerID        int64  `json:"customerId"`
+	OrderID           int64  `json:"orderId"`
 	ProviderType      string `json:"providerType"`
 	ProviderAccountID int64  `json:"providerAccountId"`
 	SyncStatus        string `json:"syncStatus"`

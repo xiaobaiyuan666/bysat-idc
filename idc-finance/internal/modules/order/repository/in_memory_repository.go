@@ -2383,6 +2383,12 @@ func filterMemoryServices(items []domain.ServiceRecord, filter domain.ServiceLis
 		if filter.Status != "" && !strings.EqualFold(string(item.Status), filter.Status) {
 			continue
 		}
+		if filter.CustomerID > 0 && item.CustomerID != filter.CustomerID {
+			continue
+		}
+		if filter.OrderID > 0 && item.OrderID != filter.OrderID {
+			continue
+		}
 		if filter.ProviderType != "" && !strings.EqualFold(item.ProviderType, filter.ProviderType) {
 			continue
 		}

@@ -3492,6 +3492,14 @@ func buildServiceFilterSQL(filter domain.ServiceListFilter) (string, []any) {
 		conditions = append(conditions, "s.status = ?")
 		args = append(args, strings.ToUpper(value))
 	}
+	if filter.CustomerID > 0 {
+		conditions = append(conditions, "s.customer_id = ?")
+		args = append(args, filter.CustomerID)
+	}
+	if filter.OrderID > 0 {
+		conditions = append(conditions, "s.order_id = ?")
+		args = append(args, filter.OrderID)
+	}
 	if value := strings.TrimSpace(filter.ProviderType); value != "" {
 		conditions = append(conditions, "s.provider_type = ?")
 		args = append(args, strings.ToUpper(value))

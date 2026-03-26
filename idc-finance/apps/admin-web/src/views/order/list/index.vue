@@ -261,6 +261,45 @@ function openCustomerWorkbench(row: OrderRecord) {
   void router.push(`/customer/detail/${row.customerId}`);
 }
 
+function openInvoiceWorkbench(row: OrderRecord) {
+  void router.push({
+    path: "/billing/invoices",
+    query: {
+      orderNo: row.orderNo,
+      customerId: String(row.customerId)
+    }
+  });
+}
+
+function openServiceWorkbench(row: OrderRecord) {
+  void router.push({
+    path: "/services/list",
+    query: {
+      orderId: String(row.id),
+      customerId: String(row.customerId)
+    }
+  });
+}
+
+function openFinanceWorkbench(row: OrderRecord) {
+  void router.push({
+    path: "/billing/accounts",
+    query: {
+      customerId: String(row.customerId)
+    }
+  });
+}
+
+function openProviderWorkbench(row: OrderRecord) {
+  void router.push({
+    path: "/providers/accounts",
+    query: {
+      providerType: row.automationType || undefined,
+      accountId: row.providerAccountId ? String(row.providerAccountId) : undefined
+    }
+  });
+}
+
 function openAutomationWorkbench(row: OrderRecord) {
   void router.push({
     path: "/providers/automation",
@@ -345,6 +384,18 @@ function handleRowAction(row: OrderRecord, command: string) {
   switch (command) {
     case "customer":
       openCustomerWorkbench(row);
+      return;
+    case "invoice":
+      openInvoiceWorkbench(row);
+      return;
+    case "service":
+      openServiceWorkbench(row);
+      return;
+    case "finance":
+      openFinanceWorkbench(row);
+      return;
+    case "provider":
+      openProviderWorkbench(row);
       return;
     case "tasks":
       openAutomationWorkbench(row);
@@ -565,6 +616,12 @@ watch(
           <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('ACTIVE')">转待开通</el-button>
           <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('COMPLETED')">标记完成</el-button>
           <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('CANCELLED')">标记取消</el-button>
+          <el-button plain :disabled="selectedRows.length !== 1" @click="selectedRows[0] && openInvoiceWorkbench(selectedRows[0])">
+            账单联查
+          </el-button>
+          <el-button plain :disabled="selectedRows.length !== 1" @click="selectedRows[0] && openServiceWorkbench(selectedRows[0])">
+            服务联查
+          </el-button>
           <el-button plain @click="copySelectedOrderNos">复制订单号</el-button>
           <el-button plain @click="exportSelected">导出选中</el-button>
           <el-button plain @click="exportCurrent">导出当前页</el-button>
@@ -581,7 +638,13 @@ watch(
         <el-table-column type="selection" width="48" />
         <el-table-column prop="orderNo" label="订单编号" min-width="170" />
         <el-table-column prop="customerId" label="客户 ID" min-width="90" />
-        <el-table-column prop="customerName" label="客户名称" min-width="170" />
+        <el-table-column label="客户名称" min-width="170">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openCustomerWorkbench(row)">
+              {{ row.customerName }}
+            </el-button>
+          </template>
+        </el-table-column>
         <el-table-column prop="productName" label="商品名称" min-width="240" show-overflow-tooltip />
         <el-table-column label="自动化渠道" min-width="140">
           <template #default="{ row }">{{ automationLabel(row.automationType) }}</template>
@@ -609,11 +672,13 @@ watch(
           </template>
         </el-table-column>
         <el-table-column prop="createdAt" label="创建时间" min-width="180" />
-        <el-table-column label="操作" min-width="260" fixed="right">
+        <el-table-column label="操作" min-width="320" fixed="right">
           <template #default="{ row }">
             <div class="inline-actions">
               <el-button type="primary" link @click="openDetail(row)">进入工作台</el-button>
               <el-button type="primary" link @click="openCustomerWorkbench(row)">客户</el-button>
+              <el-button type="primary" link @click="openInvoiceWorkbench(row)">账单</el-button>
+              <el-button type="primary" link @click="openServiceWorkbench(row)">服务</el-button>
               <el-button type="primary" link @click="openOrderRequestsWorkbench(row.id)">申请</el-button>
               <el-dropdown @command="handleRowDropdownCommand(row, $event)">
                 <el-button type="primary" link>
@@ -621,6 +686,10 @@ watch(
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
+                    <el-dropdown-item command="invoice">账单联查</el-dropdown-item>
+                    <el-dropdown-item command="service">服务联查</el-dropdown-item>
+                    <el-dropdown-item command="finance">客户财务</el-dropdown-item>
+                    <el-dropdown-item command="provider" :disabled="!row.providerAccountId">接口账户</el-dropdown-item>
                     <el-dropdown-item command="tasks">任务中心</el-dropdown-item>
                     <el-dropdown-item command="requests">订单申请</el-dropdown-item>
                     <el-dropdown-item command="pending">转待支付</el-dropdown-item>

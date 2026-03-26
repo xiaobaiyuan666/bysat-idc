@@ -5,6 +5,7 @@ import { ElMessage } from "element-plus";
 import ContextTabs from "@/components/workbench/ContextTabs.vue";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import {
+  createProduct,
   fetchProductDetail,
   fetchProductGroups,
   fetchProviderAccounts,
@@ -70,6 +71,8 @@ const router = useRouter();
 const loading = ref(false);
 const saving = ref(false);
 const syncing = ref(false);
+const copying = ref(false);
+const statusUpdating = ref(false);
 const previewLoading = ref(false);
 const groupsLoading = ref(false);
 const product = ref<ProductDetailForm | null>(null);
@@ -245,6 +248,44 @@ const templateDiffRows = computed(() => {
   ];
 });
 
+const upstreamDiffSummary = computed(() => ({
+  pricingChanged: pricingDiffRows.value.filter(row => row.localPrice !== row.remotePrice).length,
+  configChanged: configDiffRows.value.filter(row => row.localDefault !== row.remoteDefault).length,
+  templateChanged: templateDiffRows.value.filter(row => row.local !== row.remote).length,
+  remotePricingCount: remoteTemplate.value?.pricing.length ?? 0,
+  remoteConfigCount: remoteTemplate.value?.configOptions.length ?? 0
+}));
+
+const pricingSummary = computed(() => {
+  const items = product.value?.pricing ?? [];
+  return {
+    total: items.length,
+    chargeable: items.filter(item => Number(item.price || 0) > 0).length,
+    free: items.filter(item => Number(item.price || 0) <= 0).length,
+    highestPrice: items.reduce((max, item) => Math.max(max, Number(item.price || 0)), 0)
+  };
+});
+
+const configSummary = computed(() => {
+  const items = product.value?.configOptions ?? [];
+  return {
+    total: items.length,
+    required: items.filter(item => item.required).length,
+    selectLike: items.filter(item => item.inputType === "select" || item.inputType === "radio").length,
+    totalChoices: items.reduce((sum, item) => sum + item.choices.length, 0)
+  };
+});
+
+const commonPricingPresets = [
+  { cycleCode: "monthly", cycleName: "月付" },
+  { cycleCode: "quarterly", cycleName: "季付" },
+  { cycleCode: "semiannual", cycleName: "半年付" },
+  { cycleCode: "annual", cycleName: "年付" },
+  { cycleCode: "biennially", cycleName: "两年付" },
+  { cycleCode: "triennially", cycleName: "三年付" },
+  { cycleCode: "onetime", cycleName: "一次性" }
+] as const;
+
 function cloneProduct(input: Product): ProductDetailForm {
   return {
     id: input.id,
@@ -262,6 +303,22 @@ function cloneProduct(input: Product): ProductDetailForm {
     resourceTemplate: { ...input.resourceTemplate },
     automationConfig: { ...input.automationConfig },
     upstreamMapping: { ...input.upstreamMapping }
+  };
+}
+
+function buildProductPayload(source: ProductDetailForm, overrides: Record<string, unknown> = {}) {
+  return {
+    groupName: source.groupName,
+    name: source.name,
+    description: source.description,
+    productType: source.productType,
+    status: source.status,
+    pricing: source.pricing.map(item => ({ ...item })),
+    configOptions: cloneConfigOptions(source.configOptions),
+    resourceTemplate: { ...source.resourceTemplate },
+    automationConfig: { ...source.automationConfig },
+    upstreamMapping: { ...source.upstreamMapping },
+    ...overrides
   };
 }
 
@@ -437,6 +494,45 @@ function addPricingRow() {
   });
 }
 
+function addCommonPricingRows() {
+  if (!product.value) return;
+  const existing = new Set(product.value.pricing.map(item => item.cycleCode));
+  const missing = commonPricingPresets.filter(item => !existing.has(item.cycleCode));
+  product.value.pricing.push(
+    ...missing.map(item => ({
+      cycleCode: item.cycleCode,
+      cycleName: item.cycleName,
+      price: 0,
+      setupFee: 0
+    }))
+  );
+  if (missing.length > 0) {
+    ElMessage.success(`已补齐 ${missing.length} 个常用计费周期`);
+  }
+}
+
+function sortPricingRows() {
+  if (!product.value) return;
+  const order = new Map<string, number>(commonPricingPresets.map((item, index) => [item.cycleCode, index]));
+  product.value.pricing = [...product.value.pricing].sort((a, b) => {
+    const aIndex = order.get(a.cycleCode) ?? 999;
+    const bIndex = order.get(b.cycleCode) ?? 999;
+    if (aIndex !== bIndex) return aIndex - bIndex;
+    return a.cycleCode.localeCompare(b.cycleCode);
+  });
+}
+
+function duplicatePricingRow(index: number) {
+  if (!product.value) return;
+  const target = product.value.pricing[index];
+  if (!target) return;
+  product.value.pricing.splice(index + 1, 0, {
+    ...target,
+    cycleCode: `${target.cycleCode}_copy`,
+    cycleName: `${target.cycleName} 副本`
+  });
+}
+
 function removePricingRow(index: number) {
   product.value?.pricing.splice(index, 1);
 }
@@ -450,6 +546,36 @@ function addConfigOption() {
     defaultValue: "",
     description: "",
     choices: []
+  });
+}
+
+function addSelectConfigOption() {
+  addConfigOption();
+  const option = product.value?.configOptions.at(-1);
+  if (!option) return;
+  option.name = "新下拉配置项";
+  option.inputType = "select";
+  addChoice(option);
+}
+
+function addTextConfigOption() {
+  addConfigOption();
+  const option = product.value?.configOptions.at(-1);
+  if (!option) return;
+  option.name = "新文本配置项";
+  option.inputType = "text";
+  option.choices = [];
+}
+
+function duplicateConfigOption(index: number) {
+  if (!product.value) return;
+  const target = product.value.configOptions[index];
+  if (!target) return;
+  product.value.configOptions.splice(index + 1, 0, {
+    ...target,
+    code: `${target.code}_copy`,
+    name: `${target.name} 副本`,
+    choices: target.choices.map(choice => ({ ...choice }))
   });
 }
 
@@ -548,18 +674,7 @@ async function handleSave() {
   if (!product.value) return;
   saving.value = true;
   try {
-    const updated = await updateProduct(product.value.id, {
-      groupName: product.value.groupName,
-      name: product.value.name,
-      description: product.value.description,
-      productType: product.value.productType,
-      status: product.value.status,
-      pricing: product.value.pricing,
-      configOptions: product.value.configOptions,
-      resourceTemplate: product.value.resourceTemplate,
-      automationConfig: product.value.automationConfig,
-      upstreamMapping: product.value.upstreamMapping
-    });
+    const updated = await updateProduct(product.value.id, buildProductPayload(product.value));
     product.value = cloneProduct(updated);
     ElMessage.success(`\u5546\u54c1 ${updated.productNo} \u5df2\u4fdd\u5b58`);
   } finally {
@@ -580,24 +695,78 @@ async function handleSync() {
   }
 }
 
+async function duplicateCurrentProduct() {
+  if (!product.value) return;
+  copying.value = true;
+  try {
+    const created = await createProduct(
+      buildProductPayload(product.value, {
+        name: `${product.value.name} - 副本`,
+        description: product.value.description
+          ? `${product.value.description}\n\n复制自 ${product.value.productNo}`
+          : `复制自 ${product.value.productNo}`,
+        upstreamMapping: {
+          providerAccountId: 0,
+          providerType: "NONE",
+          sourceName: "",
+          remoteProductCode: "",
+          remoteProductName: "",
+          pricePolicy: product.value.upstreamMapping.pricePolicy,
+          autoSyncPricing: false,
+          autoSyncConfig: false,
+          autoSyncTemplate: false
+        }
+      })
+    );
+    ElMessage.success(`已复制商品 ${created.productNo}`);
+    await router.push(`/catalog/products/${created.id}`);
+  } finally {
+    copying.value = false;
+  }
+}
+
+async function toggleCurrentProductStatus() {
+  if (!product.value) return;
+  statusUpdating.value = true;
+  const nextStatus = product.value.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+  try {
+    const updated = await updateProduct(
+      product.value.id,
+      buildProductPayload(product.value, {
+        status: nextStatus
+      })
+    );
+    product.value = cloneProduct(updated);
+    ElMessage.success(`商品状态已切换为${nextStatus === "ACTIVE" ? "启用" : "停用"}`);
+  } finally {
+    statusUpdating.value = false;
+  }
+}
+
 function openAutomationAccountWorkbench() {
-  if (!product.value?.automationConfig.providerAccountId) return;
+  if (!product.value) return;
+  const providerType = product.value.automationConfig.channel;
+  if (providerType === "LOCAL" || providerType === "MANUAL") return;
   void router.push({
     path: "/providers/accounts",
     query: {
-      providerType: product.value.automationConfig.channel,
-      accountId: String(product.value.automationConfig.providerAccountId)
+      providerType,
+      accountId: product.value.automationConfig.providerAccountId
+        ? String(product.value.automationConfig.providerAccountId)
+        : undefined
     }
   });
 }
 
 function openUpstreamAccountWorkbench() {
-  if (!product.value?.upstreamMapping.providerAccountId) return;
+  if (!product.value || product.value.upstreamMapping.providerType === "NONE") return;
   void router.push({
     path: "/providers/accounts",
     query: {
       providerType: product.value.upstreamMapping.providerType,
-      accountId: String(product.value.upstreamMapping.providerAccountId)
+      accountId: product.value.upstreamMapping.providerAccountId
+        ? String(product.value.upstreamMapping.providerAccountId)
+        : undefined
     }
   });
 }
@@ -652,6 +821,18 @@ function openProductResourcesWorkbench() {
     query: {
       providerType,
       accountId: accountId ? String(accountId) : undefined
+    }
+  });
+}
+
+function openUpstreamSyncHistoryWorkbench() {
+  if (!product.value?.upstreamMapping.providerAccountId) return;
+  void router.push({
+    path: "/providers/upstream-sync-history",
+    query: {
+      providerAccountId: String(product.value.upstreamMapping.providerAccountId),
+      providerType: product.value.upstreamMapping.providerType || undefined,
+      keyword: product.value.upstreamMapping.remoteProductCode || product.value.productNo
     }
   });
 }
@@ -749,6 +930,10 @@ onMounted(async () => {
       <template #actions>
         <el-button @click="router.push('/catalog/products')">{{ t.back }}</el-button>
         <el-button @click="loadProductDetail">{{ t.refresh }}</el-button>
+        <el-button plain :loading="copying" @click="duplicateCurrentProduct">复制商品</el-button>
+        <el-button plain :loading="statusUpdating" @click="toggleCurrentProductStatus">
+          {{ product?.status === "ACTIVE" ? "停用商品" : "启用商品" }}
+        </el-button>
         <el-button
           v-if="product && product.upstreamMapping.providerType !== 'NONE'"
           type="success"
@@ -757,6 +942,13 @@ onMounted(async () => {
           @click="handleSync"
         >
           {{ t.sync }}
+        </el-button>
+        <el-button
+          v-if="product && product.upstreamMapping.providerAccountId"
+          plain
+          @click="openUpstreamSyncHistoryWorkbench"
+        >
+          上游同步记录
         </el-button>
         <el-button type="primary" :loading="saving" @click="handleSave">{{ t.save }}</el-button>
       </template>
@@ -836,16 +1028,23 @@ onMounted(async () => {
                   <div class="summary-pill"><span>上游策略</span><strong>{{ pricePolicyLabel(product.upstreamMapping.pricePolicy) }}</strong></div>
                 </div>
                 <div class="inline-actions" style="margin-top: 16px">
-                  <el-button plain :disabled="!product.automationConfig.providerAccountId" @click="openAutomationAccountWorkbench">
+                  <el-button
+                    plain
+                    :disabled="product.automationConfig.channel === 'LOCAL' || product.automationConfig.channel === 'MANUAL'"
+                    @click="openAutomationAccountWorkbench"
+                  >
                     自动化账户
                   </el-button>
-                  <el-button plain :disabled="!product.upstreamMapping.providerAccountId" @click="openUpstreamAccountWorkbench">
+                  <el-button plain :disabled="product.upstreamMapping.providerType === 'NONE'" @click="openUpstreamAccountWorkbench">
                     上游账户
                   </el-button>
                   <el-button plain @click="openProductOrdersWorkbench">订单列表</el-button>
                   <el-button plain @click="openProductServicesWorkbench">服务列表</el-button>
                   <el-button plain @click="openProductAutomationWorkbench">自动化任务</el-button>
                   <el-button plain @click="openProductResourcesWorkbench">渠道资源</el-button>
+                  <el-button plain :disabled="!product.upstreamMapping.providerAccountId" @click="openUpstreamSyncHistoryWorkbench">
+                    上游同步记录
+                  </el-button>
                 </div>
               </div>
             </div>
@@ -1023,11 +1222,20 @@ onMounted(async () => {
                 <span class="section-card__meta">先把上游模板回填到当前草稿，再决定是否保存到正式商品。</span>
               </div>
               <div class="summary-strip">
-                <div class="summary-pill"><span>价格差异</span><strong>{{ pricingDiffRows.length }}</strong></div>
-                <div class="summary-pill"><span>配置差异</span><strong>{{ configDiffRows.length }}</strong></div>
-                <div class="summary-pill"><span>模板差异</span><strong>{{ templateDiffRows.length }}</strong></div>
+                <div class="summary-pill"><span>价格差异</span><strong>{{ upstreamDiffSummary.pricingChanged }}</strong></div>
+                <div class="summary-pill"><span>配置差异</span><strong>{{ upstreamDiffSummary.configChanged }}</strong></div>
+                <div class="summary-pill"><span>模板差异</span><strong>{{ upstreamDiffSummary.templateChanged }}</strong></div>
+                <div class="summary-pill"><span>远端价格周期</span><strong>{{ upstreamDiffSummary.remotePricingCount }}</strong></div>
+                <div class="summary-pill"><span>远端配置项</span><strong>{{ upstreamDiffSummary.remoteConfigCount }}</strong></div>
               </div>
               <div class="inline-actions" style="margin-top: 16px">
+                <el-button plain :loading="previewLoading" @click="loadRemotePreview">刷新远端模板</el-button>
+                <el-button plain :disabled="product.upstreamMapping.providerType === 'NONE'" @click="openUpstreamAccountWorkbench">
+                  上游账户
+                </el-button>
+                <el-button plain :disabled="!product.upstreamMapping.providerAccountId" @click="openUpstreamSyncHistoryWorkbench">
+                  同步记录
+                </el-button>
                 <el-button plain @click="applyRemotePricing">回填价格</el-button>
                 <el-button plain @click="applyRemoteConfigOptions">回填配置项</el-button>
                 <el-button plain @click="applyRemoteResourceTemplate">回填云模板</el-button>
@@ -1071,7 +1279,17 @@ onMounted(async () => {
             <div class="panel-card">
               <div class="section-card__head">
                 <strong>价格矩阵</strong>
-                <el-button type="primary" plain size="small" @click="addPricingRow">新增周期</el-button>
+                <div class="inline-actions">
+                  <el-button size="small" plain @click="addCommonPricingRows">补齐常用周期</el-button>
+                  <el-button size="small" plain @click="sortPricingRows">排序周期</el-button>
+                  <el-button type="primary" plain size="small" @click="addPricingRow">新增周期</el-button>
+                </div>
+              </div>
+              <div class="summary-strip" style="margin-bottom: 16px">
+                <div class="summary-pill"><span>周期总数</span><strong>{{ pricingSummary.total }}</strong></div>
+                <div class="summary-pill"><span>可收费周期</span><strong>{{ pricingSummary.chargeable }}</strong></div>
+                <div class="summary-pill"><span>免费周期</span><strong>{{ pricingSummary.free }}</strong></div>
+                <div class="summary-pill"><span>最高售价</span><strong>¥{{ pricingSummary.highestPrice.toFixed(2) }}</strong></div>
               </div>
               <el-table :data="product.pricing" border stripe>
                 <el-table-column label="周期编码" min-width="140">
@@ -1086,22 +1304,51 @@ onMounted(async () => {
                 <el-table-column label="开户费" min-width="120">
                   <template #default="{ row }"><el-input-number v-model="row.setupFee" :min="0" style="width: 100%" /></template>
                 </el-table-column>
-                <el-table-column label="操作" min-width="90" fixed="right">
-                  <template #default="{ $index }"><el-button link type="danger" @click="removePricingRow($index)">删除</el-button></template>
+                <el-table-column label="操作" min-width="140" fixed="right">
+                  <template #default="{ $index }">
+                    <div class="inline-actions">
+                      <el-button link type="primary" @click="duplicatePricingRow($index)">复制</el-button>
+                      <el-button link type="danger" @click="removePricingRow($index)">删除</el-button>
+                    </div>
+                  </template>
                 </el-table-column>
               </el-table>
             </div>
           </el-tab-pane>
 
           <el-tab-pane :label="t.config" name="config">
+            <div class="summary-strip" style="margin-bottom: 16px">
+              <div class="summary-pill"><span>配置项总数</span><strong>{{ configSummary.total }}</strong></div>
+              <div class="summary-pill"><span>必填项</span><strong>{{ configSummary.required }}</strong></div>
+              <div class="summary-pill"><span>选择类</span><strong>{{ configSummary.selectLike }}</strong></div>
+              <div class="summary-pill"><span>选项总数</span><strong>{{ configSummary.totalChoices }}</strong></div>
+            </div>
+            <div class="table-toolbar">
+              <div class="table-toolbar__meta">
+                <strong>配置项编辑台</strong>
+                <span>快速维护下拉、单选、文本类配置，并控制默认值和加价策略</span>
+              </div>
+              <div class="inline-actions">
+                <el-button plain @click="addSelectConfigOption">新增下拉项</el-button>
+                <el-button plain @click="addTextConfigOption">新增文本项</el-button>
+                <el-button type="primary" plain @click="addConfigOption">新增配置项</el-button>
+              </div>
+            </div>
             <div class="portal-grid" style="gap: 16px">
               <div v-for="(option, optionIndex) in product.configOptions" :key="`${option.code}-${optionIndex}`" class="panel-card">
                 <div class="section-card__head">
                   <strong>{{ option.name || `配置项 ${optionIndex + 1}` }}</strong>
                   <div class="inline-actions">
+                    <el-button size="small" plain @click="duplicateConfigOption(optionIndex)">复制配置项</el-button>
                     <el-button size="small" type="primary" plain @click="addChoice(option)">新增选项</el-button>
                     <el-button size="small" link type="danger" @click="removeConfigOption(optionIndex)">删除配置项</el-button>
                   </div>
+                </div>
+                <div class="summary-strip" style="margin-bottom: 12px">
+                  <div class="summary-pill"><span>编码</span><strong>{{ option.code || "-" }}</strong></div>
+                  <div class="summary-pill"><span>类型</span><strong>{{ option.inputType }}</strong></div>
+                  <div class="summary-pill"><span>默认值</span><strong>{{ option.defaultValue || "-" }}</strong></div>
+                  <div class="summary-pill"><span>选项数</span><strong>{{ option.choices.length }}</strong></div>
                 </div>
                 <div class="filter-bar filter-bar--compact">
                   <el-input v-model="option.code" placeholder="编码" />
@@ -1131,9 +1378,6 @@ onMounted(async () => {
                     <template #default="{ $index }"><el-button link type="danger" @click="removeChoice(option, $index)">删除</el-button></template>
                   </el-table-column>
                 </el-table>
-              </div>
-              <div class="panel-card">
-                <el-button type="primary" plain @click="addConfigOption">新增配置项</el-button>
               </div>
             </div>
           </el-tab-pane>

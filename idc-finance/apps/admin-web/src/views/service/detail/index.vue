@@ -391,6 +391,24 @@ const changeOrderSummary = computed(() => {
   };
 });
 
+const syncLogSummary = computed(() => ({
+  total: syncLogs.value.length,
+  success: syncLogs.value.filter(item => item.status === "SUCCESS").length,
+  failed: syncLogs.value.filter(item => item.status === "FAILED").length,
+  running: syncLogs.value.filter(item => item.status === "RUNNING").length,
+  latestAction: syncLogs.value[0]?.action || "-"
+}));
+
+const resourceSummary = computed(() => ({
+  totalIps: resources.value?.ipAddresses.length ?? 0,
+  ipv4: resources.value?.ipAddresses.filter(item => item.version === "IPv4").length ?? 0,
+  ipv6: resources.value?.ipAddresses.filter(item => item.version === "IPv6").length ?? 0,
+  diskCount: resources.value?.disks.length ?? 0,
+  diskCapacityGb: resources.value?.disks.reduce((sum, item) => sum + Number(item.sizeGb || 0), 0) ?? 0,
+  snapshotCount: resources.value?.snapshots.length ?? 0,
+  backupCount: resources.value?.backups.length ?? 0
+}));
+
 const channelStrategyGuide = computed(() => {
   if (isMofangService.value) {
     return {
@@ -692,19 +710,69 @@ function openOrderWorkbench() {
   void router.push(`/orders/detail/${detail.value.order.id}`);
 }
 
-function openInvoiceWorkbench() {
-  if (!detail.value?.invoice) return;
-  void router.push(`/billing/invoices/${detail.value.invoice.id}`);
+function openCustomerWorkbench() {
+  if (!detail.value) return;
+  void router.push(`/customer/detail/${detail.value.service.customerId}`);
 }
 
-function openTicketCreateWorkbench() {
+function openCustomerFinanceWorkbench() {
+  if (!detail.value) return;
+  void router.push({
+    path: "/billing/accounts",
+    query: {
+      customerId: String(detail.value.service.customerId)
+    }
+  });
+}
+
+function openPaymentsWorkbench(invoiceId?: number) {
+  if (!detail.value) return;
+  void router.push({
+    path: "/billing/payments",
+    query: {
+      customerId: String(detail.value.service.customerId),
+      invoiceId: invoiceId ? String(invoiceId) : detail.value.invoice?.id ? String(detail.value.invoice.id) : undefined
+    }
+  });
+}
+
+function openRefundsWorkbench(invoiceId?: number) {
+  if (!detail.value) return;
+  void router.push({
+    path: "/billing/refunds",
+    query: {
+      customerId: String(detail.value.service.customerId),
+      invoiceId: invoiceId ? String(invoiceId) : detail.value.invoice?.id ? String(detail.value.invoice.id) : undefined
+    }
+  });
+}
+
+function openOrderRequestsWorkbench(orderId?: number) {
+  const id = orderId || detail.value?.order?.id;
+  if (!id) return;
+  void router.push({
+    path: "/orders/requests",
+    query: {
+      orderId: String(id)
+    }
+  });
+}
+
+function openInvoiceWorkbench(invoiceId?: number) {
+  const id = invoiceId || detail.value?.invoice?.id;
+  if (!id) return;
+  void router.push(`/billing/invoices/${id}`);
+}
+
+function openTicketCreateWorkbench(overrides?: { title?: string; content?: string }) {
   if (!detail.value) return;
   void router.push({
     path: "/tickets/create",
     query: {
       customerId: String(detail.value.service.customerId),
       serviceId: String(detail.value.service.id),
-      title: `${detail.value.service.serviceNo} / ${detail.value.service.productName}`
+      title: overrides?.title || `${detail.value.service.serviceNo} / ${detail.value.service.productName}`,
+      content: overrides?.content
     }
   });
 }
@@ -763,6 +831,26 @@ function openChangeOrdersWorkbench(filters?: { status?: string; executionStatus?
       status: filters?.status || undefined,
       executionStatus: filters?.executionStatus || undefined
     }
+  });
+}
+
+function openChangeOrderFailureTicket(row: {
+  orderNo: string;
+  invoiceNo: string;
+  title: string;
+  executionStatus: string;
+  executionMessage?: string;
+}) {
+  if (!detail.value) return;
+  openTicketCreateWorkbench({
+    title: `${detail.value.service.serviceNo} / 改配异常 / ${row.title || row.orderNo}`,
+    content: [
+      `服务号：${detail.value.service.serviceNo}`,
+      `订单号：${row.orderNo || "-"}`,
+      `账单号：${row.invoiceNo || "-"}`,
+      `执行状态：${row.executionStatus || "-"}`,
+      `异常回执：${row.executionMessage || "请管理员核对自动化任务和资源状态"}`
+    ].join("\n")
   });
 }
 
@@ -1015,15 +1103,23 @@ onMounted(async () => {
                   <span class="section-card__meta">围绕订单、账单和工单继续处理当前服务</span>
                 </div>
                 <div class="summary-strip">
+                  <div class="summary-pill"><span>客户</span><strong>{{ detail.order?.customerName || `客户 #${detail.service.customerId}` }}</strong></div>
                   <div class="summary-pill"><span>订单</span><strong>{{ detail.order?.orderNo || "-" }}</strong></div>
                   <div class="summary-pill"><span>账单</span><strong>{{ detail.invoice?.invoiceNo || "-" }}</strong></div>
                   <div class="summary-pill"><span>服务</span><strong>{{ detail.service.serviceNo }}</strong></div>
                 </div>
                 <div class="command-group__actions" style="margin-top: 16px">
+                  <el-button plain @click="openCustomerWorkbench">客户详情</el-button>
                   <el-button plain :disabled="!detail.order" @click="openOrderWorkbench">订单工作台</el-button>
                   <el-button type="primary" plain :disabled="!detail.invoice" @click="openInvoiceWorkbench">账单工作台</el-button>
+                  <el-button plain @click="openCustomerFinanceWorkbench">资金台账</el-button>
                   <el-button plain @click="openTicketListWorkbench">工单中心</el-button>
                   <el-button plain @click="openTicketCreateWorkbench">代客建单</el-button>
+                </div>
+                <div class="command-group__actions" style="margin-top: 12px">
+                  <el-button plain :disabled="!detail.order" @click="openOrderRequestsWorkbench">订单申请</el-button>
+                  <el-button plain @click="openPaymentsWorkbench">支付记录</el-button>
+                  <el-button plain @click="openRefundsWorkbench">退款记录</el-button>
                 </div>
               </div>
 
@@ -1185,7 +1281,8 @@ onMounted(async () => {
                 <div class="summary-strip">
                   <div class="summary-pill"><span>工单入口</span><strong>已接通</strong></div>
                   <div class="summary-pill"><span>自动化</span><strong>{{ detail.service.providerType || "-" }}</strong></div>
-                  <div class="summary-pill"><span>同步日志</span><strong>{{ syncLogs.length }}</strong></div>
+                  <div class="summary-pill"><span>同步日志</span><strong>{{ syncLogSummary.total }}</strong></div>
+                  <div class="summary-pill"><span>失败日志</span><strong>{{ syncLogSummary.failed }}</strong></div>
                 </div>
                 <div class="command-group__actions" style="margin-top: 16px">
                   <el-button plain @click="openProviderAccountsWorkbench">接口账户</el-button>
@@ -1239,10 +1336,13 @@ onMounted(async () => {
 
           <el-tab-pane v-if="resources" label="渠道资源动作">
             <div class="summary-strip">
-              <div class="summary-pill"><span>IP</span><strong>{{ resources.ipAddresses.length }}</strong></div>
-              <div class="summary-pill"><span>磁盘</span><strong>{{ resources.disks.length }}</strong></div>
-              <div class="summary-pill"><span>快照</span><strong>{{ resources.snapshots.length }}</strong></div>
-              <div class="summary-pill"><span>备份</span><strong>{{ resources.backups.length }}</strong></div>
+              <div class="summary-pill"><span>IP</span><strong>{{ resourceSummary.totalIps }}</strong></div>
+              <div class="summary-pill"><span>IPv4</span><strong>{{ resourceSummary.ipv4 }}</strong></div>
+              <div class="summary-pill"><span>IPv6</span><strong>{{ resourceSummary.ipv6 }}</strong></div>
+              <div class="summary-pill"><span>磁盘</span><strong>{{ resourceSummary.diskCount }}</strong></div>
+              <div class="summary-pill"><span>磁盘容量</span><strong>{{ resourceSummary.diskCapacityGb }} GB</strong></div>
+              <div class="summary-pill"><span>快照</span><strong>{{ resourceSummary.snapshotCount }}</strong></div>
+              <div class="summary-pill"><span>备份</span><strong>{{ resourceSummary.backupCount }}</strong></div>
             </div>
 
             <el-alert
@@ -1459,6 +1559,40 @@ onMounted(async () => {
           </el-tab-pane>
 
           <el-tab-pane label="同步日志">
+            <div class="summary-strip" style="margin-bottom: 16px">
+              <div class="summary-pill">
+                <span>日志总数</span>
+                <strong>{{ syncLogSummary.total }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>成功</span>
+                <strong>{{ syncLogSummary.success }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>失败</span>
+                <strong>{{ syncLogSummary.failed }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>执行中</span>
+                <strong>{{ syncLogSummary.running }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>最近动作</span>
+                <strong>{{ formatSyncLogAction(localeStore.locale, syncLogSummary.latestAction) }}</strong>
+              </div>
+            </div>
+            <div class="table-toolbar">
+              <div class="table-toolbar__meta">
+                <strong>同步协同工作台</strong>
+                <span>围绕当前服务的同步回执、资源状态和财务收口继续处理</span>
+              </div>
+              <div class="inline-actions">
+                <el-button plain @click="openCustomerFinanceWorkbench">客户财务</el-button>
+                <el-button plain @click="openTicketListWorkbench">工单中心</el-button>
+                <el-button plain @click="openProviderResourcesWorkbench">渠道资源</el-button>
+                <el-button plain @click="openProviderAutomationWorkbench">自动化任务</el-button>
+              </div>
+            </div>
             <el-table :data="syncLogs" border stripe empty-text="当前服务暂无同步日志">
               <el-table-column prop="createdAt" label="时间" min-width="180" />
               <el-table-column label="动作" min-width="140">
@@ -1474,11 +1608,27 @@ onMounted(async () => {
                 </template>
               </el-table-column>
               <el-table-column prop="message" label="回执" min-width="320" show-overflow-tooltip />
-              <el-table-column label="操作" min-width="170" fixed="right">
-                <template #default>
+              <el-table-column label="操作" min-width="320" fixed="right">
+                <template #default="{ row }">
                   <div class="inline-actions">
+                    <el-button v-if="row.invoiceId || detail?.invoice" type="primary" link @click="openInvoiceWorkbench(row.invoiceId)">
+                      账单
+                    </el-button>
+                    <el-button v-if="row.invoiceId || detail?.invoice" type="primary" link @click="openPaymentsWorkbench(row.invoiceId)">
+                      支付
+                    </el-button>
+                    <el-button v-if="row.invoiceId || detail?.invoice" type="primary" link @click="openRefundsWorkbench(row.invoiceId)">
+                      退款
+                    </el-button>
+                    <el-button type="primary" link @click="openCustomerFinanceWorkbench">财务</el-button>
                     <el-button type="primary" link @click="openProviderResourcesWorkbench">资源</el-button>
-                    <el-button type="primary" link @click="openProviderAutomationWorkbench">任务</el-button>
+                    <el-button
+                      type="primary"
+                      link
+                      @click="openProviderAutomationContext({ orderId: row.orderId, invoiceId: row.invoiceId })"
+                    >
+                      任务
+                    </el-button>
                   </div>
                 </template>
               </el-table-column>
@@ -1490,6 +1640,34 @@ onMounted(async () => {
               <div class="section-card__head">
                 <strong>改配单执行记录</strong>
                 <span class="section-card__meta">生成改配单、收款执行、退款回退都在这里查看</span>
+              </div>
+              <div class="summary-strip" style="margin-bottom: 16px">
+                <div class="summary-pill"><span>改配总数</span><strong>{{ changeOrderSummary.total }}</strong></div>
+                <div class="summary-pill"><span>待支付</span><strong>{{ changeOrderSummary.unpaid }}</strong></div>
+                <div class="summary-pill"><span>已支付</span><strong>{{ changeOrderSummary.paid }}</strong></div>
+                <div class="summary-pill"><span>已退款</span><strong>{{ changeOrderSummary.refunded }}</strong></div>
+                <div class="summary-pill"><span>执行异常</span><strong>{{ changeOrderSummary.failedExecution }}</strong></div>
+              </div>
+              <div class="table-toolbar">
+                <div class="table-toolbar__meta">
+                  <strong>改配收口工作台</strong>
+                  <span>围绕待支付、执行异常、账单与工单协同处理当前服务的改配单</span>
+                </div>
+                <div class="inline-actions">
+                  <el-button plain @click="openChangeOrdersWorkbench()">全部改配单</el-button>
+                  <el-button plain :disabled="changeOrderSummary.unpaid === 0" @click="openChangeOrdersWorkbench({ status: 'UNPAID' })">
+                    待支付改配
+                  </el-button>
+                  <el-button
+                    plain
+                    :disabled="changeOrderSummary.failedExecution === 0"
+                    @click="openChangeOrdersWorkbench({ executionStatus: 'EXECUTE_FAILED' })"
+                  >
+                    执行异常
+                  </el-button>
+                  <el-button plain @click="openCustomerFinanceWorkbench">客户财务</el-button>
+                  <el-button plain @click="openTicketListWorkbench">工单中心</el-button>
+                </div>
               </div>
               <div class="inline-actions" style="margin-bottom: 12px">
                 <el-button type="primary" link @click="router.push(`/orders/change-orders?serviceId=${detail.service.id}`)">打开改配单工作台</el-button>
@@ -1522,11 +1700,21 @@ onMounted(async () => {
                 <el-table-column label="执行结果" min-width="260" show-overflow-tooltip>
                   <template #default="{ row }">{{ row.executionMessage || "-" }}</template>
                 </el-table-column>
-                <el-table-column label="操作" min-width="150" fixed="right">
+                <el-table-column label="操作" min-width="320" fixed="right">
                   <template #default="{ row }">
                     <div class="inline-actions">
                       <el-button type="primary" link @click="router.push(`/orders/detail/${row.orderId}`)">订单</el-button>
                       <el-button type="primary" link @click="router.push(`/billing/invoices/${row.invoiceId}`)">账单</el-button>
+                      <el-button type="primary" link @click="openPaymentsWorkbench(row.invoiceId)">支付</el-button>
+                      <el-button type="primary" link @click="openRefundsWorkbench(row.invoiceId)">退款</el-button>
+                      <el-button
+                        v-if="row.executionStatus === 'FAILED' || row.executionStatus === 'EXECUTE_FAILED'"
+                        type="warning"
+                        link
+                        @click="openChangeOrderFailureTicket(row)"
+                      >
+                        异常工单
+                      </el-button>
                       <el-button type="primary" link @click="openProviderAutomationContext({ orderId: row.orderId, invoiceId: row.invoiceId })">
                         任务
                       </el-button>

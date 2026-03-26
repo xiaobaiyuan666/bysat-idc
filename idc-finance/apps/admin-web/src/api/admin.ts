@@ -329,6 +329,8 @@ export interface ServiceQuery {
   sort?: string;
   order?: string;
   status?: string;
+  customer_id?: number | string;
+  order_id?: number | string;
   provider_type?: string;
   provider_account_id?: number | string;
   sync_status?: string;

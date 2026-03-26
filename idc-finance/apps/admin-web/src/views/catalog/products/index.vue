@@ -14,6 +14,7 @@ import {
   fetchUpstreamProducts,
   importUpstreamProducts,
   syncProductUpstream,
+  updateProduct,
   type Product,
   type ProviderAccount,
   type UpstreamCatalogGroup,
@@ -27,6 +28,7 @@ const route = useRoute();
 
 const loading = ref(false);
 const syncing = ref(false);
+const statusUpdating = ref(false);
 const creating = ref(false);
 const importLoading = ref(false);
 const importSubmitting = ref(false);
@@ -112,6 +114,7 @@ const importSummary = computed(() => ({
   total: upstreamCatalogItems.value.length,
   selected: importForm.importAll ? upstreamCatalogItems.value.length : importForm.remoteProductCodes.length
 }));
+const selectedSingleProduct = computed(() => (selectedRows.value.length === 1 ? selectedRows.value[0] : null));
 
 const importPreview = computed(() => {
   const items = importForm.importAll
@@ -229,6 +232,25 @@ function canSyncProduct(product: Product) {
     return Boolean(product.upstreamMapping.remoteProductCode);
   }
   return product.upstreamMapping.providerType !== "NONE";
+}
+
+function buildProductPayload(product: Product, overrides: Record<string, unknown> = {}) {
+  return {
+    groupName: product.groupName,
+    name: product.name,
+    description: product.description,
+    productType: product.productType,
+    status: product.status,
+    pricing: product.pricing.map(item => ({ ...item })),
+    configOptions: product.configOptions.map(item => ({
+      ...item,
+      choices: item.choices.map(choice => ({ ...choice }))
+    })),
+    resourceTemplate: { ...product.resourceTemplate },
+    automationConfig: { ...product.automationConfig },
+    upstreamMapping: { ...product.upstreamMapping },
+    ...overrides
+  };
 }
 
 function resetCreateForm() {
@@ -414,6 +436,75 @@ async function batchSyncSelected() {
   }
 }
 
+async function batchUpdateStatus(nextStatus: "ACTIVE" | "INACTIVE", rows?: Product[]) {
+  const targetRows = rows && rows.length > 0 ? rows : selectedRows.value;
+  if (targetRows.length === 0) {
+    ElMessage.info("请先选择商品");
+    return;
+  }
+
+  statusUpdating.value = true;
+  let success = 0;
+  let failed = 0;
+  try {
+    for (const item of targetRows) {
+      if (item.status === nextStatus) continue;
+      try {
+        await updateProduct(
+          item.id,
+          buildProductPayload(item, {
+            status: nextStatus
+          })
+        );
+        success += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    ElMessage.success(
+      failed > 0 ? `批量状态更新完成，成功 ${success}，失败 ${failed}` : `已更新 ${success} 个商品状态`
+    );
+    await loadProducts();
+  } finally {
+    statusUpdating.value = false;
+  }
+}
+
+async function duplicateSelectedProduct() {
+  const source = selectedSingleProduct.value;
+  if (!source) {
+    ElMessage.info("请只选择一个商品进行复制");
+    return;
+  }
+
+  creating.value = true;
+  try {
+    await createProduct(
+      buildProductPayload(source, {
+        name: `${source.name} - 副本`,
+        description: source.description
+          ? `${source.description}\n\n复制自 ${source.productNo}`
+          : `复制自 ${source.productNo}`,
+        upstreamMapping: {
+          providerAccountId: 0,
+          providerType: "NONE",
+          sourceName: "",
+          remoteProductCode: "",
+          remoteProductName: "",
+          pricePolicy: source.upstreamMapping.pricePolicy,
+          autoSyncPricing: false,
+          autoSyncConfig: false,
+          autoSyncTemplate: false
+        }
+      })
+    );
+    ElMessage.success(`已复制商品 ${source.productNo}`);
+    await loadProducts();
+  } finally {
+    creating.value = false;
+  }
+}
+
 async function copySelectedProductNos() {
   if (selectedRows.value.length === 0) {
     ElMessage.info("请先选择商品");
@@ -458,6 +549,41 @@ function exportSelected() {
 
 function openDetail(product: Product) {
   void router.push(`/catalog/products/${product.id}`);
+}
+
+function openOrderWorkbench(product: Product) {
+  void router.push({
+    path: "/orders/list",
+    query: {
+      productName: product.name
+    }
+  });
+}
+
+function openServiceWorkbench(product: Product) {
+  void router.push({
+    path: "/services/list",
+    query: {
+      keyword: product.name
+    }
+  });
+}
+
+function openProviderWorkbench(product: Product) {
+  const providerAccountId = product.automationConfig.providerAccountId || product.upstreamMapping.providerAccountId;
+  const providerType =
+    product.automationConfig.channel && product.automationConfig.channel !== "LOCAL"
+      ? product.automationConfig.channel
+      : product.upstreamMapping.providerType !== "NONE"
+        ? product.upstreamMapping.providerType
+        : "";
+  void router.push({
+    path: "/providers/accounts",
+    query: {
+      providerType: providerType || undefined,
+      accountId: providerAccountId ? String(providerAccountId) : undefined
+    }
+  });
 }
 
 function buildResourceTemplate(template: UpstreamProductTemplate) {
@@ -684,6 +810,19 @@ watch(
         </div>
         <div class="action-group">
           <el-button plain @click="copySelectedProductNos">复制商品编号</el-button>
+          <el-button plain :loading="statusUpdating" :disabled="selectedRows.length === 0" @click="batchUpdateStatus('ACTIVE')">
+            启用选中
+          </el-button>
+          <el-button plain :loading="statusUpdating" :disabled="selectedRows.length === 0" @click="batchUpdateStatus('INACTIVE')">
+            停用选中
+          </el-button>
+          <el-button plain :disabled="selectedRows.length !== 1" @click="duplicateSelectedProduct">复制商品</el-button>
+          <el-button plain :disabled="!selectedSingleProduct" @click="selectedSingleProduct && openOrderWorkbench(selectedSingleProduct)">
+            查看订单
+          </el-button>
+          <el-button plain :disabled="!selectedSingleProduct" @click="selectedSingleProduct && openServiceWorkbench(selectedSingleProduct)">
+            查看服务
+          </el-button>
           <el-button plain @click="exportSelected">导出选中商品</el-button>
           <el-button plain @click="exportCurrent">导出当前列表</el-button>
           <el-button type="primary" plain :loading="syncing" @click="batchSyncSelected">批量同步上游</el-button>
@@ -722,13 +861,26 @@ watch(
             <el-tag :type="statusTagType(row.status)" effect="light">{{ formatStatus(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="180" fixed="right">
+        <el-table-column label="操作" min-width="300" fixed="right">
           <template #default="{ row }">
             <div class="inline-actions">
               <el-button type="primary" link @click="openDetail(row)">进入工作台</el-button>
+              <el-button type="primary" link @click="openOrderWorkbench(row)">订单</el-button>
+              <el-button type="primary" link @click="openServiceWorkbench(row)">服务</el-button>
               <el-button v-if="canSyncProduct(row)" type="success" link :disabled="syncing" @click="syncSingleProduct(row)">
                 同步
               </el-button>
+              <el-dropdown>
+                <el-button type="primary" link>更多</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="openProviderWorkbench(row)">接口账户</el-dropdown-item>
+                    <el-dropdown-item @click="batchUpdateStatus(row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE', [row])">
+                      {{ row.status === "ACTIVE" ? "停用当前商品" : "启用当前商品" }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>

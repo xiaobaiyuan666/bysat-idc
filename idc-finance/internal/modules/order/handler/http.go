@@ -900,6 +900,8 @@ func parseServiceListFilter(c *gin.Context) domain.ServiceListFilter {
 		Sort:              strings.TrimSpace(c.DefaultQuery("sort", "created_at")),
 		Order:             strings.TrimSpace(c.DefaultQuery("order", "desc")),
 		Status:            strings.TrimSpace(c.Query("status")),
+		CustomerID:        parseOptionalInt64(firstNonEmptyQueryValue(c, "customer_id", "customerId", "uid")),
+		OrderID:           parseOptionalInt64(firstNonEmptyQueryValue(c, "order_id", "orderId")),
 		ProviderType:      strings.TrimSpace(c.Query("provider_type")),
 		ProviderAccountID: parseOptionalInt64(c.Query("provider_account_id")),
 		SyncStatus:        strings.TrimSpace(c.Query("sync_status")),
