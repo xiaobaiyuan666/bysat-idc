@@ -66,6 +66,20 @@ type CreateServiceChangeOrderRequest struct {
 	Payload      map[string]any `json:"payload"`
 }
 
+type CreateOrderRequestRequest struct {
+	Type                  string         `json:"type" binding:"required"`
+	Summary               string         `json:"summary"`
+	Reason                string         `json:"reason"`
+	RequestedAmount       *float64       `json:"requestedAmount"`
+	RequestedBillingCycle string         `json:"requestedBillingCycle"`
+	Payload               map[string]any `json:"payload"`
+}
+
+type ProcessOrderRequestRequest struct {
+	Status      string `json:"status" binding:"required"`
+	ProcessNote string `json:"processNote"`
+}
+
 type ServiceActionRequest struct {
 	ImageName string `json:"imageName"`
 	Password  string `json:"password"`
@@ -114,6 +128,11 @@ type ServiceChangeOrderListResponse struct {
 	Total int                        `json:"total"`
 }
 
+type OrderRequestListResponse struct {
+	Items []domain.OrderRequest `json:"items"`
+	Total int                   `json:"total"`
+}
+
 type CustomerWalletResponse struct {
 	Wallet       domain.CustomerWallet       `json:"wallet"`
 	Transactions []domain.AccountTransaction `json:"transactions"`
@@ -133,6 +152,7 @@ type OrderDetailResponse struct {
 	Order       domain.Order              `json:"order"`
 	Invoices    []domain.Invoice          `json:"invoices"`
 	Services    []domain.ServiceRecord    `json:"services"`
+	Requests    []domain.OrderRequest     `json:"requests"`
 	ChangeOrder *ServiceChangeOrderRecord `json:"changeOrder,omitempty"`
 	AuditLogs   []audit.Entry             `json:"auditLogs"`
 }

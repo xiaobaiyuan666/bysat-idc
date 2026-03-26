@@ -21,7 +21,8 @@
     "dev:admin": "npm run dev --workspace apps/admin-web",
     "dev:portal": "npm run dev --workspace apps/portal-web",
     "build:admin": "npm run build --workspace apps/admin-web",
-    "build:portal": "npm run build --workspace apps/portal-web"
+    "build:portal": "npm run build --workspace apps/portal-web",
+    "build:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-release.ps1"
   },
   "devDependencies": {
     "unplugin-auto-import": "^21.0.0",

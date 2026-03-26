@@ -258,6 +258,19 @@ export interface OrderQuery {
   product_name?: string;
 }
 
+export interface OrderRequestQuery {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: string;
+  orderId?: number | string;
+  customerId?: number | string;
+  uid?: number | string;
+  type?: string;
+  status?: string;
+  keyword?: string;
+}
+
 export interface InvoiceQuery {
   page?: number;
   limit?: number;
@@ -652,6 +665,7 @@ export interface OrderDetailResponse {
   order: OrderRecord;
   invoices: InvoiceRecord[];
   services: ServiceRecord[];
+  requests: OrderRequestRecord[];
   changeOrder?: ServiceChangeOrderRecord;
   auditLogs: AuditLog[];
 }
@@ -698,6 +712,35 @@ export interface ServiceChangeOrderRecord {
   createdAt: string;
   updatedAt: string;
   latestTask?: AutomationTask;
+}
+
+export interface OrderRequestRecord {
+  id: number;
+  requestNo: string;
+  orderId: number;
+  orderNo: string;
+  customerId: number;
+  customerName: string;
+  productName: string;
+  type: string;
+  status: string;
+  summary: string;
+  reason: string;
+  currentAmount: number;
+  requestedAmount: number;
+  currentBillingCycle: string;
+  requestedBillingCycle: string;
+  sourceType: string;
+  sourceId: number;
+  sourceName: string;
+  processorType: string;
+  processorId: number;
+  processorName: string;
+  processNote: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  processedAt: string;
 }
 
 export interface MofangHealthResponse {
@@ -1168,6 +1211,20 @@ export interface CreateServiceChangeOrderRequest {
   payload?: Record<string, unknown>;
 }
 
+export interface CreateOrderRequestRequest {
+  type: string;
+  summary?: string;
+  reason: string;
+  requestedAmount?: number;
+  requestedBillingCycle?: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface ProcessOrderRequestRequest {
+  status: string;
+  processNote?: string;
+}
+
 export interface CreateServiceChangeOrderResponse {
   service: ServiceRecord;
   order: OrderRecord;
@@ -1453,6 +1510,21 @@ export async function fetchOrderDetail(id: number | string) {
 
 export async function updatePendingOrder(id: number | string, payload: UpdatePendingOrderRequest) {
   const { data } = await http.patch(`/orders/${id}`, payload);
+  return data.data as OrderDetailResponse;
+}
+
+export async function fetchOrderRequests(params?: OrderRequestQuery) {
+  const { data } = await http.get("/order-requests", { params });
+  return data.data as { items: OrderRequestRecord[]; total: number };
+}
+
+export async function createOrderRequest(id: number | string, payload: CreateOrderRequestRequest) {
+  const { data } = await http.post(`/orders/${id}/requests`, payload);
+  return data.data as OrderDetailResponse;
+}
+
+export async function processOrderRequest(id: number | string, payload: ProcessOrderRequestRequest) {
+  const { data } = await http.patch(`/order-requests/${id}`, payload);
   return data.data as OrderDetailResponse;
 }
 

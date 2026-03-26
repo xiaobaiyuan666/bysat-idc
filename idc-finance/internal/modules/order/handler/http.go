@@ -26,6 +26,9 @@ func (handler *Handler) RegisterAdminRoutes(router *gin.RouterGroup) {
 	router.GET("/orders", handler.listAdminOrders)
 	router.GET("/orders/:id", handler.adminOrderDetail)
 	router.PATCH("/orders/:id", handler.adminUpdatePendingOrder)
+	router.POST("/orders/:id/requests", handler.adminCreateOrderRequest)
+	router.GET("/order-requests", handler.listAdminOrderRequests)
+	router.PATCH("/order-requests/:id", handler.adminProcessOrderRequest)
 	router.GET("/invoices", handler.listAdminInvoices)
 	router.GET("/invoices/:id", handler.adminInvoiceDetail)
 	router.PATCH("/invoices/:id", handler.adminUpdateUnpaidInvoice)
@@ -84,6 +87,111 @@ func (handler *Handler) adminUpdatePendingOrder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":      "ORDER_NOT_FOUND",
 			"message":   "订单不存在，无法人工调整",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(result, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) adminCreateOrderRequest(c *gin.Context) {
+	orderID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "订单编号格式不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	var request dto.CreateOrderRequestRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "订单申请参数不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	result, ok, createErr := handler.service.CreateOrderRequest(
+		orderID,
+		request,
+		getAdminID(c),
+		getAdminName(c),
+		middleware.GetRequestID(c),
+	)
+	if createErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "ORDER_REQUEST_CREATE_FAILED",
+			"message":   createErr.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "ORDER_NOT_FOUND",
+			"message":   "订单不存在，无法创建申请",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(result, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) listAdminOrderRequests(c *gin.Context) {
+	filter := parseOrderRequestListFilter(c)
+	items, total := handler.service.ListOrderRequests(filter)
+	c.JSON(http.StatusOK, appErrors.Ok(dto.OrderRequestListResponse{
+		Items: items,
+		Total: total,
+	}, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) adminProcessOrderRequest(c *gin.Context) {
+	requestID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "申请编号格式不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	var request dto.ProcessOrderRequestRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "申请处理参数不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	result, ok, processErr := handler.service.ProcessOrderRequest(
+		requestID,
+		request,
+		getAdminID(c),
+		getAdminName(c),
+		middleware.GetRequestID(c),
+	)
+	if processErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "ORDER_REQUEST_PROCESS_FAILED",
+			"message":   processErr.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "ORDER_REQUEST_NOT_FOUND",
+			"message":   "订单申请不存在",
 			"requestId": middleware.GetRequestID(c),
 		})
 		return
@@ -811,6 +919,20 @@ func parseServiceChangeOrderListFilter(c *gin.Context) domain.ServiceChangeOrder
 		InvoiceID: parseOptionalInt64(c.Query("invoiceId")),
 		Action:    strings.TrimSpace(c.Query("action")),
 		Keyword:   strings.TrimSpace(c.Query("keyword")),
+	}
+}
+
+func parseOrderRequestListFilter(c *gin.Context) domain.OrderRequestListFilter {
+	return domain.OrderRequestListFilter{
+		Page:       parsePositiveInt(c.DefaultQuery("page", "1"), 1),
+		Limit:      parsePositiveInt(c.DefaultQuery("limit", "20"), 20),
+		Sort:       strings.TrimSpace(c.DefaultQuery("sort", "created_at")),
+		Order:      strings.TrimSpace(c.DefaultQuery("order", "desc")),
+		OrderID:    parseOptionalInt64(c.Query("orderId")),
+		CustomerID: parseOptionalInt64(firstNonEmptyQueryValue(c, "customerId", "uid")),
+		Type:       strings.TrimSpace(c.Query("type")),
+		Status:     strings.TrimSpace(c.Query("status")),
+		Keyword:    strings.TrimSpace(c.Query("keyword")),
 	}
 }
 

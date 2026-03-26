@@ -58,6 +58,7 @@ func (service *Service) GetOrderDetail(orderID int64) (dto.OrderDetailResponse, 
 		Order:       order,
 		Invoices:    service.repository.ListInvoicesByOrder(orderID),
 		Services:    service.repository.ListServicesByOrder(orderID),
+		Requests:    service.repository.ListOrderRequestsByOrder(orderID),
 		ChangeOrder: service.buildChangeOrderRecord(changeOrder, hasChangeOrder),
 		AuditLogs:   service.audit.ListByTarget("order", orderID),
 	}, true
@@ -159,6 +160,136 @@ func (service *Service) ListPayments(filter domain.PaymentListFilter) ([]domain.
 
 func (service *Service) ListRefunds(filter domain.RefundListFilter) ([]domain.RefundRecord, int) {
 	return service.repository.ListRefunds(filter)
+}
+
+func (service *Service) ListOrderRequests(filter domain.OrderRequestListFilter) ([]domain.OrderRequest, int) {
+	return service.repository.ListOrderRequests(filter)
+}
+
+func (service *Service) CreateOrderRequest(
+	orderID int64,
+	request dto.CreateOrderRequestRequest,
+	adminID int64,
+	adminName,
+	requestID string,
+) (dto.OrderDetailResponse, bool, error) {
+	order, exists := service.repository.GetOrderByID(orderID)
+	if !exists {
+		return dto.OrderDetailResponse{}, false, nil
+	}
+
+	requestType := normalizeOrderRequestType(request.Type)
+	if requestType == "" {
+		return dto.OrderDetailResponse{}, false, fmt.Errorf("订单申请类型不正确")
+	}
+	if request.RequestedAmount != nil && *request.RequestedAmount < 0 {
+		return dto.OrderDetailResponse{}, false, fmt.Errorf("申请金额不能小于 0")
+	}
+	reason := strings.TrimSpace(request.Reason)
+	if reason == "" {
+		return dto.OrderDetailResponse{}, false, fmt.Errorf("申请原因不能为空")
+	}
+
+	summary := strings.TrimSpace(request.Summary)
+	if summary == "" {
+		summary = defaultOrderRequestSummary(requestType, order.ProductName)
+	}
+
+	created, ok, err := service.repository.CreateOrderRequest(orderID, domain.OrderRequestCreateInput{
+		Type:                  requestType,
+		Summary:               summary,
+		Reason:                reason,
+		RequestedAmount:       request.RequestedAmount,
+		RequestedBillingCycle: strings.TrimSpace(request.RequestedBillingCycle),
+		SourceType:            "ADMIN",
+		SourceID:              adminID,
+		SourceName:            adminName,
+		Payload:               request.Payload,
+	})
+	if err != nil {
+		return dto.OrderDetailResponse{}, false, err
+	}
+	if !ok {
+		return dto.OrderDetailResponse{}, false, nil
+	}
+
+	service.audit.Record(audit.Entry{
+		ActorType:   "ADMIN",
+		ActorID:     adminID,
+		Actor:       adminName,
+		Action:      "order.request.create",
+		TargetType:  "order",
+		TargetID:    order.ID,
+		Target:      order.OrderNo,
+		RequestID:   requestID,
+		Description: "后台创建订单申请，进入后续审批或跟进流程",
+		Payload: map[string]any{
+			"requestNo":              created.RequestNo,
+			"type":                   created.Type,
+			"summary":                created.Summary,
+			"reason":                 created.Reason,
+			"currentAmount":          created.CurrentAmount,
+			"requestedAmount":        created.RequestedAmount,
+			"currentBillingCycle":    created.CurrentBillingCycle,
+			"requestedBillingCycle":  created.RequestedBillingCycle,
+			"status":                 created.Status,
+			"sourceType":             created.SourceType,
+			"sourceName":             created.SourceName,
+		},
+	})
+
+	detail, ok := service.GetOrderDetail(orderID)
+	return detail, ok, nil
+}
+
+func (service *Service) ProcessOrderRequest(
+	requestIDValue int64,
+	request dto.ProcessOrderRequestRequest,
+	adminID int64,
+	adminName,
+	requestTraceID string,
+) (dto.OrderDetailResponse, bool, error) {
+	status := normalizeOrderRequestStatus(request.Status)
+	if status == "" || status == string(domain.OrderRequestStatusPending) {
+		return dto.OrderDetailResponse{}, false, fmt.Errorf("订单申请处理状态不正确")
+	}
+
+	updated, ok, err := service.repository.ProcessOrderRequest(requestIDValue, domain.OrderRequestProcessInput{
+		Status:        status,
+		ProcessNote:   strings.TrimSpace(request.ProcessNote),
+		ProcessorType: "ADMIN",
+		ProcessorID:   adminID,
+		ProcessorName: adminName,
+	})
+	if err != nil {
+		return dto.OrderDetailResponse{}, false, err
+	}
+	if !ok {
+		return dto.OrderDetailResponse{}, false, nil
+	}
+
+	service.audit.Record(audit.Entry{
+		ActorType:   "ADMIN",
+		ActorID:     adminID,
+		Actor:       adminName,
+		Action:      "order.request.process",
+		TargetType:  "order",
+		TargetID:    updated.OrderID,
+		Target:      updated.OrderNo,
+		RequestID:   requestTraceID,
+		Description: "后台处理订单申请，并记录审批结果",
+		Payload: map[string]any{
+			"requestNo":    updated.RequestNo,
+			"type":         updated.Type,
+			"status":       updated.Status,
+			"processNote":  updated.ProcessNote,
+			"processorName": updated.ProcessorName,
+			"processedAt":  updated.ProcessedAt,
+		},
+	})
+
+	detail, exists := service.GetOrderDetail(updated.OrderID)
+	return detail, exists, nil
 }
 
 func (service *Service) ListServiceChangeOrders(filter domain.ServiceChangeOrderListFilter) ([]dto.ServiceChangeOrderRecord, int) {
@@ -1763,6 +1894,53 @@ func (service *Service) markProvisionBlocked(
 		},
 	})
 	return target
+}
+
+func normalizeOrderRequestType(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(domain.OrderRequestTypeCancel):
+		return string(domain.OrderRequestTypeCancel)
+	case string(domain.OrderRequestTypeRenew):
+		return string(domain.OrderRequestTypeRenew)
+	case string(domain.OrderRequestTypePriceAdjust):
+		return string(domain.OrderRequestTypePriceAdjust)
+	default:
+		return ""
+	}
+}
+
+func normalizeOrderRequestStatus(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(domain.OrderRequestStatusPending):
+		return string(domain.OrderRequestStatusPending)
+	case string(domain.OrderRequestStatusApproved):
+		return string(domain.OrderRequestStatusApproved)
+	case string(domain.OrderRequestStatusRejected):
+		return string(domain.OrderRequestStatusRejected)
+	case string(domain.OrderRequestStatusCompleted):
+		return string(domain.OrderRequestStatusCompleted)
+	case string(domain.OrderRequestStatusCancelled):
+		return string(domain.OrderRequestStatusCancelled)
+	default:
+		return ""
+	}
+}
+
+func defaultOrderRequestSummary(requestType, productName string) string {
+	productName = strings.TrimSpace(productName)
+	if productName == "" {
+		productName = "当前订单"
+	}
+	switch requestType {
+	case string(domain.OrderRequestTypeCancel):
+		return fmt.Sprintf("%s取消申请", productName)
+	case string(domain.OrderRequestTypeRenew):
+		return fmt.Sprintf("%s续费请求", productName)
+	case string(domain.OrderRequestTypePriceAdjust):
+		return fmt.Sprintf("%s改价申请", productName)
+	default:
+		return fmt.Sprintf("%s业务申请", productName)
+	}
 }
 
 func slugify(value string) string {

@@ -1353,6 +1353,195 @@ FROM refunds r` + whereSQL + ` ORDER BY ` + sortColumn + ` ` + sortDirection + `
 	return result, total
 }
 
+func (repository *MySQLRepository) ListOrderRequestsByOrder(orderID int64) []domain.OrderRequest {
+	items, _ := repository.ListOrderRequests(domain.OrderRequestListFilter{
+		OrderID: orderID,
+		Page:    1,
+		Limit:   0,
+		Sort:    "created_at",
+		Order:   "desc",
+	})
+	return items
+}
+
+func (repository *MySQLRepository) ListOrderRequests(filter domain.OrderRequestListFilter) ([]domain.OrderRequest, int) {
+	whereSQL, args := buildOrderRequestFilterSQL(filter)
+
+	countQuery := `SELECT COUNT(*) FROM order_requests orq` + whereSQL
+	var total int
+	if err := repository.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		log.Printf("order mysql count order requests failed: %v", err)
+		return nil, 0
+	}
+
+	sortColumn := resolveOrderRequestSortColumn(filter.Sort)
+	sortDirection := resolveSortDirection(filter.Order)
+	query := `SELECT orq.id FROM order_requests orq` + whereSQL + ` ORDER BY ` + sortColumn + ` ` + sortDirection + `, orq.id DESC`
+	queryArgs := append([]any{}, args...)
+	if filter.Limit > 0 {
+		page := filter.Page
+		if page <= 0 {
+			page = 1
+		}
+		offset := (page - 1) * filter.Limit
+		query += ` LIMIT ? OFFSET ?`
+		queryArgs = append(queryArgs, filter.Limit, offset)
+	}
+
+	rows, err := repository.db.Query(query, queryArgs...)
+	if err != nil {
+		log.Printf("order mysql list order requests failed: %v", err)
+		return nil, 0
+	}
+	defer rows.Close()
+
+	items := make([]domain.OrderRequest, 0)
+	ctx := context.Background()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			log.Printf("order mysql scan order request id failed: %v", err)
+			return items, total
+		}
+		item, err := repository.loadOrderRequest(ctx, repository.db, id)
+		if err != nil {
+			log.Printf("order mysql load order request failed: %v", err)
+			return items, total
+		}
+		items = append(items, item)
+	}
+	return items, total
+}
+
+func (repository *MySQLRepository) CreateOrderRequest(
+	orderID int64,
+	input domain.OrderRequestCreateInput,
+) (domain.OrderRequest, bool, error) {
+	ctx := context.Background()
+	tx, err := repository.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+	defer rollbackQuietly(tx)
+
+	order, err := repository.loadOrderForUpdate(ctx, tx, orderID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return domain.OrderRequest{}, false, nil
+		}
+		return domain.OrderRequest{}, false, err
+	}
+
+	requestedAmount := order.Amount
+	if input.RequestedAmount != nil {
+		requestedAmount = *input.RequestedAmount
+	} else if strings.EqualFold(strings.TrimSpace(input.Type), string(domain.OrderRequestTypeCancel)) {
+		requestedAmount = 0
+	}
+
+	requestedBillingCycle := firstNonEmptyMySQL(input.RequestedBillingCycle, order.BillingCycle)
+	payloadJSON := []byte("{}")
+	if input.Payload != nil {
+		if encoded, err := json.Marshal(input.Payload); err == nil {
+			payloadJSON = encoded
+		}
+	}
+
+	tempRequestNo := fmt.Sprintf("TMP-REQ-%d", time.Now().UnixNano())
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO order_requests (
+	request_no, order_id, order_no, customer_id, customer_name, product_name, type, status, summary, reason,
+	current_amount, requested_amount, current_billing_cycle, requested_billing_cycle,
+	source_type, source_id, source_name, payload_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tempRequestNo,
+		order.ID,
+		order.OrderNo,
+		order.CustomerID,
+		order.CustomerName,
+		order.ProductName,
+		strings.ToUpper(strings.TrimSpace(input.Type)),
+		string(domain.OrderRequestStatusPending),
+		firstNonEmptyMySQL(input.Summary, order.ProductName+"业务申请"),
+		strings.TrimSpace(input.Reason),
+		order.Amount,
+		requestedAmount,
+		order.BillingCycle,
+		requestedBillingCycle,
+		firstNonEmptyMySQL(strings.ToUpper(strings.TrimSpace(input.SourceType)), "ADMIN"),
+		nullInt64(input.SourceID),
+		firstNonEmptyMySQL(input.SourceName, "系统"),
+		payloadJSON,
+	)
+	if err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+
+	requestRowID, err := result.LastInsertId()
+	if err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+	requestNo := fmt.Sprintf("REQ-%08d", requestRowID)
+	if _, err := tx.ExecContext(ctx, `UPDATE order_requests SET request_no = ? WHERE id = ?`, requestNo, requestRowID); err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+
+	item, err := repository.loadOrderRequest(ctx, tx, requestRowID)
+	if err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+	return item, true, nil
+}
+
+func (repository *MySQLRepository) ProcessOrderRequest(
+	requestID int64,
+	input domain.OrderRequestProcessInput,
+) (domain.OrderRequest, bool, error) {
+	ctx := context.Background()
+	tx, err := repository.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+	defer rollbackQuietly(tx)
+
+	item, err := repository.loadOrderRequestForUpdate(ctx, tx, requestID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return domain.OrderRequest{}, false, nil
+		}
+		return domain.OrderRequest{}, false, err
+	}
+	if !canTransitionOrderRequestStatusMySQL(string(item.Status), input.Status) {
+		return domain.OrderRequest{}, false, fmt.Errorf("当前申请状态不允许继续处理")
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE order_requests
+SET status = ?, process_note = ?, processor_type = ?, processor_id = ?, processor_name = ?, processed_at = NOW()
+WHERE id = ?`,
+		strings.ToUpper(strings.TrimSpace(input.Status)),
+		strings.TrimSpace(input.ProcessNote),
+		firstNonEmptyMySQL(strings.ToUpper(strings.TrimSpace(input.ProcessorType)), "ADMIN"),
+		nullInt64(input.ProcessorID),
+		firstNonEmptyMySQL(input.ProcessorName, "系统"),
+		requestID,
+	); err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+
+	updated, err := repository.loadOrderRequest(ctx, tx, requestID)
+	if err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.OrderRequest{}, false, err
+	}
+	return updated, true, nil
+}
+
 func (repository *MySQLRepository) ListServiceChangeOrders(filter domain.ServiceChangeOrderListFilter) ([]domain.ServiceChangeOrder, int) {
 	whereSQL, args := buildServiceChangeOrderFilterSQL(filter)
 
@@ -2459,6 +2648,125 @@ WHERE id = ?`, id)
 	return item, nil
 }
 
+func (repository *MySQLRepository) loadOrderRequest(ctx context.Context, queryer queryer, id int64) (domain.OrderRequest, error) {
+	row := queryer.QueryRowContext(ctx, `
+SELECT id, request_no, order_id, order_no, customer_id, customer_name, product_name, type, status, summary, reason,
+       current_amount, requested_amount, IFNULL(current_billing_cycle, ''), IFNULL(requested_billing_cycle, ''),
+       IFNULL(source_type, ''), source_id, IFNULL(source_name, ''),
+       IFNULL(processor_type, ''), processor_id, IFNULL(processor_name, ''), IFNULL(process_note, ''),
+       payload_json,
+       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s'),
+       DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s'),
+       IFNULL(DATE_FORMAT(processed_at, '%Y-%m-%d %H:%i:%s'), '')
+FROM order_requests
+WHERE id = ?`, id)
+
+	var (
+		item        domain.OrderRequest
+		typeDB      string
+		statusDB    string
+		sourceID    sql.NullInt64
+		processorID sql.NullInt64
+		payloadJSON []byte
+	)
+	if err := row.Scan(
+		&item.ID,
+		&item.RequestNo,
+		&item.OrderID,
+		&item.OrderNo,
+		&item.CustomerID,
+		&item.CustomerName,
+		&item.ProductName,
+		&typeDB,
+		&statusDB,
+		&item.Summary,
+		&item.Reason,
+		&item.CurrentAmount,
+		&item.RequestedAmount,
+		&item.CurrentBillingCycle,
+		&item.RequestedBillingCycle,
+		&item.SourceType,
+		&sourceID,
+		&item.SourceName,
+		&item.ProcessorType,
+		&processorID,
+		&item.ProcessorName,
+		&item.ProcessNote,
+		&payloadJSON,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+		&item.ProcessedAt,
+	); err != nil {
+		return domain.OrderRequest{}, err
+	}
+	item.Type = domain.OrderRequestType(typeDB)
+	item.Status = domain.OrderRequestStatus(statusDB)
+	assignNullInt64(&item.SourceID, sourceID)
+	assignNullInt64(&item.ProcessorID, processorID)
+	_ = json.Unmarshal(payloadJSON, &item.Payload)
+	return item, nil
+}
+
+func (repository *MySQLRepository) loadOrderRequestForUpdate(ctx context.Context, tx *sql.Tx, id int64) (domain.OrderRequest, error) {
+	row := tx.QueryRowContext(ctx, `
+SELECT id, request_no, order_id, order_no, customer_id, customer_name, product_name, type, status, summary, reason,
+       current_amount, requested_amount, IFNULL(current_billing_cycle, ''), IFNULL(requested_billing_cycle, ''),
+       IFNULL(source_type, ''), source_id, IFNULL(source_name, ''),
+       IFNULL(processor_type, ''), processor_id, IFNULL(processor_name, ''), IFNULL(process_note, ''),
+       payload_json,
+       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s'),
+       DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s'),
+       IFNULL(DATE_FORMAT(processed_at, '%Y-%m-%d %H:%i:%s'), '')
+FROM order_requests
+WHERE id = ?
+FOR UPDATE`, id)
+
+	var (
+		item        domain.OrderRequest
+		typeDB      string
+		statusDB    string
+		sourceID    sql.NullInt64
+		processorID sql.NullInt64
+		payloadJSON []byte
+	)
+	if err := row.Scan(
+		&item.ID,
+		&item.RequestNo,
+		&item.OrderID,
+		&item.OrderNo,
+		&item.CustomerID,
+		&item.CustomerName,
+		&item.ProductName,
+		&typeDB,
+		&statusDB,
+		&item.Summary,
+		&item.Reason,
+		&item.CurrentAmount,
+		&item.RequestedAmount,
+		&item.CurrentBillingCycle,
+		&item.RequestedBillingCycle,
+		&item.SourceType,
+		&sourceID,
+		&item.SourceName,
+		&item.ProcessorType,
+		&processorID,
+		&item.ProcessorName,
+		&item.ProcessNote,
+		&payloadJSON,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+		&item.ProcessedAt,
+	); err != nil {
+		return domain.OrderRequest{}, err
+	}
+	item.Type = domain.OrderRequestType(typeDB)
+	item.Status = domain.OrderRequestStatus(statusDB)
+	assignNullInt64(&item.SourceID, sourceID)
+	assignNullInt64(&item.ProcessorID, processorID)
+	_ = json.Unmarshal(payloadJSON, &item.Payload)
+	return item, nil
+}
+
 func (repository *MySQLRepository) loadLatestPayment(ctx context.Context, queryer queryer, invoiceID int64) (domain.PaymentRecord, bool) {
 	row := queryer.QueryRowContext(ctx, `
 SELECT id, payment_no, invoice_id, order_id, customer_id, channel, trade_no, amount, source, status, operator_name,
@@ -3320,6 +3628,35 @@ func buildRefundFilterSQL(filter domain.RefundListFilter) (string, []any) {
 	return " WHERE " + strings.Join(conditions, " AND "), args
 }
 
+func buildOrderRequestFilterSQL(filter domain.OrderRequestListFilter) (string, []any) {
+	conditions := []string{"1 = 1"}
+	args := make([]any, 0)
+
+	if filter.OrderID > 0 {
+		conditions = append(conditions, "orq.order_id = ?")
+		args = append(args, filter.OrderID)
+	}
+	if filter.CustomerID > 0 {
+		conditions = append(conditions, "orq.customer_id = ?")
+		args = append(args, filter.CustomerID)
+	}
+	if value := strings.TrimSpace(filter.Type); value != "" {
+		conditions = append(conditions, "orq.type = ?")
+		args = append(args, strings.ToUpper(value))
+	}
+	if value := strings.TrimSpace(filter.Status); value != "" {
+		conditions = append(conditions, "orq.status = ?")
+		args = append(args, strings.ToUpper(value))
+	}
+	if value := strings.TrimSpace(filter.Keyword); value != "" {
+		pattern := "%" + value + "%"
+		conditions = append(conditions, "(orq.request_no LIKE ? OR orq.order_no LIKE ? OR orq.customer_name LIKE ? OR orq.product_name LIKE ? OR IFNULL(orq.summary, '') LIKE ? OR IFNULL(orq.reason, '') LIKE ?)")
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern)
+	}
+
+	return " WHERE " + strings.Join(conditions, " AND "), args
+}
+
 func buildServiceChangeOrderFilterSQL(filter domain.ServiceChangeOrderListFilter) (string, []any) {
 	conditions := []string{"1 = 1"}
 	args := make([]any, 0)
@@ -3427,6 +3764,21 @@ func resolveRefundSortColumn(value string) string {
 	}
 }
 
+func resolveOrderRequestSortColumn(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "request_no":
+		return "orq.request_no"
+	case "updated_at":
+		return "orq.updated_at"
+	case "processed_at":
+		return "orq.processed_at"
+	case "requested_amount":
+		return "orq.requested_amount"
+	default:
+		return "orq.created_at"
+	}
+}
+
 func resolveServiceChangeOrderSortColumn(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "amount":
@@ -3447,6 +3799,41 @@ func resolveSortDirection(value string) string {
 		return "ASC"
 	}
 	return "DESC"
+}
+
+func firstNonEmptyMySQL(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func nullInt64(value int64) any {
+	if value <= 0 {
+		return nil
+	}
+	return value
+}
+
+func canTransitionOrderRequestStatusMySQL(current, next string) bool {
+	current = strings.ToUpper(strings.TrimSpace(current))
+	next = strings.ToUpper(strings.TrimSpace(next))
+	if current == "" || next == "" || current == next {
+		return false
+	}
+
+	switch current {
+	case string(domain.OrderRequestStatusPending):
+		return next == string(domain.OrderRequestStatusApproved) ||
+			next == string(domain.OrderRequestStatusRejected) ||
+			next == string(domain.OrderRequestStatusCancelled)
+	case string(domain.OrderRequestStatusApproved):
+		return next == string(domain.OrderRequestStatusCompleted) ||
+			next == string(domain.OrderRequestStatusCancelled)
+	default:
+		return false
+	}
 }
 
 func parseMySQLFilterTime(value string, endOfDay bool) (time.Time, bool) {

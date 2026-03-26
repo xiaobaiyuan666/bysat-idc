@@ -3,13 +3,15 @@ package config
 import "os"
 
 type AppConfig struct {
-	AppName       string
-	HTTPAddr      string
-	GinMode       string
-	StorageDriver string
-	StorageStrict bool
-	MySQLDSN      string
-	MofangCloud   MofangCloudConfig
+	AppName         string
+	HTTPAddr        string
+	GinMode         string
+	StorageDriver   string
+	StorageStrict   bool
+	MySQLDSN        string
+	AdminWebDir     string
+	PortalWebDir    string
+	MofangCloud     MofangCloudConfig
 	FinanceUpstream FinanceUpstreamConfig
 }
 
@@ -33,12 +35,14 @@ type FinanceUpstreamConfig struct {
 
 func Load() AppConfig {
 	return AppConfig{
-		AppName:       getEnv("APP_NAME", "idc-finance-api"),
+		AppName:       getEnv("APP_NAME", "wuqiongyun-idc-api"),
 		HTTPAddr:      getEnv("HTTP_ADDR", ":18080"),
 		GinMode:       getEnv("GIN_MODE", "debug"),
 		StorageDriver: getEnv("STORAGE_DRIVER", "memory"),
 		StorageStrict: getBoolEnv("STORAGE_STRICT", false),
 		MySQLDSN:      getEnv("MYSQL_DSN", ""),
+		AdminWebDir:   getEnv("ADMIN_WEB_DIR", "web/admin"),
+		PortalWebDir:  getEnv("PORTAL_WEB_DIR", "web/portal"),
 		MofangCloud: MofangCloudConfig{
 			BaseURL:            getEnv("MOFANG_CLOUD_BASE_URL", ""),
 			Username:           getEnv("MOFANG_CLOUD_USERNAME", ""),

@@ -19,12 +19,14 @@ type MemoryRepository struct {
 	nextServiceID            int64
 	nextPaymentID            int64
 	nextRefundID             int64
+	nextOrderRequestID       int64
 	nextAccountTransactionID int64
 	orders                   []domain.Order
 	invoices                 []domain.Invoice
 	services                 []domain.ServiceRecord
 	payments                 []domain.PaymentRecord
 	refunds                  []domain.RefundRecord
+	orderRequests            []domain.OrderRequest
 	serviceChanges           []memoryServiceChangeLink
 	wallets                  map[int64]domain.CustomerWallet
 	accountTransactions      []domain.AccountTransaction
@@ -86,6 +88,7 @@ func NewMemoryRepository() *MemoryRepository {
 		nextServiceID:            2,
 		nextPaymentID:            2,
 		nextRefundID:             1,
+		nextOrderRequestID:       3,
 		nextAccountTransactionID: 4,
 		orders: []domain.Order{
 			{
@@ -195,7 +198,60 @@ func NewMemoryRepository() *MemoryRepository {
 				PaidAt:     now.Add(-23 * time.Hour).Format("2006-01-02 15:04:05"),
 			},
 		},
-		refunds:        []domain.RefundRecord{},
+		refunds: []domain.RefundRecord{},
+		orderRequests: []domain.OrderRequest{
+			{
+				ID:                    1,
+				RequestNo:             "REQ-00000001",
+				OrderID:               1,
+				OrderNo:               "ORD-20260320-0001",
+				CustomerID:            1,
+				CustomerName:          "演示客户",
+				ProductName:           "弹性云主机 CN2 标准型",
+				Type:                  domain.OrderRequestTypeRenew,
+				Status:                domain.OrderRequestStatusPending,
+				Summary:               "弹性云主机年度续费请求",
+				Reason:                "客户希望提前确认续费预算并锁定当前资源配置",
+				CurrentAmount:         1999,
+				RequestedAmount:       1999,
+				CurrentBillingCycle:   "annual",
+				RequestedBillingCycle: "annual",
+				SourceType:            "PORTAL",
+				SourceID:              1,
+				SourceName:            "演示客户",
+				Payload:               map[string]any{"channel": "portal", "priority": "normal"},
+				CreatedAt:             now.Add(-8 * time.Hour).Format("2006-01-02 15:04:05"),
+				UpdatedAt:             now.Add(-8 * time.Hour).Format("2006-01-02 15:04:05"),
+			},
+			{
+				ID:                    2,
+				RequestNo:             "REQ-00000002",
+				OrderID:               2,
+				OrderNo:               "ORD-20260320-0002",
+				CustomerID:            1,
+				CustomerName:          "演示客户",
+				ProductName:           "精品带宽 50M",
+				Type:                  domain.OrderRequestTypePriceAdjust,
+				Status:                domain.OrderRequestStatusApproved,
+				Summary:               "精品带宽改价申请",
+				Reason:                "销售承诺首月优惠价，待财务确认",
+				CurrentAmount:         299,
+				RequestedAmount:       249,
+				CurrentBillingCycle:   "monthly",
+				RequestedBillingCycle: "monthly",
+				SourceType:            "ADMIN",
+				SourceID:              1,
+				SourceName:            "系统管理员",
+				ProcessorType:         "ADMIN",
+				ProcessorID:           1,
+				ProcessorName:         "系统管理员",
+				ProcessNote:           "同意按首月优惠价执行，后续续费恢复标准价",
+				Payload:               map[string]any{"discountType": "first_month"},
+				CreatedAt:             now.Add(-5 * time.Hour).Format("2006-01-02 15:04:05"),
+				UpdatedAt:             now.Add(-4 * time.Hour).Format("2006-01-02 15:04:05"),
+				ProcessedAt:           now.Add(-4 * time.Hour).Format("2006-01-02 15:04:05"),
+			},
+		},
 		serviceChanges: []memoryServiceChangeLink{},
 		wallets: map[int64]domain.CustomerWallet{
 			1: {
@@ -995,6 +1051,153 @@ func (repository *MemoryRepository) ListRefunds(filter domain.RefundListFilter) 
 	return items, total
 }
 
+func (repository *MemoryRepository) ListOrderRequestsByOrder(orderID int64) []domain.OrderRequest {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+
+	items := make([]domain.OrderRequest, 0)
+	for _, item := range repository.orderRequests {
+		if item.OrderID == orderID {
+			items = append(items, cloneOrderRequest(item))
+		}
+	}
+	slices.SortFunc(items, func(left, right domain.OrderRequest) int {
+		return compareMemoryOrderRequests(left, right, "created_at", "desc")
+	})
+	return items
+}
+
+func (repository *MemoryRepository) ListOrderRequests(filter domain.OrderRequestListFilter) ([]domain.OrderRequest, int) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+
+	items := make([]domain.OrderRequest, 0, len(repository.orderRequests))
+	for _, item := range repository.orderRequests {
+		request := cloneOrderRequest(item)
+		if filter.OrderID > 0 && request.OrderID != filter.OrderID {
+			continue
+		}
+		if filter.CustomerID > 0 && request.CustomerID != filter.CustomerID {
+			continue
+		}
+		if value := strings.TrimSpace(filter.Type); value != "" && !strings.EqualFold(string(request.Type), value) {
+			continue
+		}
+		if value := strings.TrimSpace(filter.Status); value != "" && !strings.EqualFold(string(request.Status), value) {
+			continue
+		}
+		if keyword := strings.ToLower(strings.TrimSpace(filter.Keyword)); keyword != "" {
+			haystack := strings.ToLower(strings.Join([]string{
+				request.RequestNo,
+				request.OrderNo,
+				request.CustomerName,
+				request.ProductName,
+				request.Summary,
+				request.Reason,
+			}, " "))
+			if !strings.Contains(haystack, keyword) {
+				continue
+			}
+		}
+		items = append(items, request)
+	}
+
+	slices.SortFunc(items, func(left, right domain.OrderRequest) int {
+		return compareMemoryOrderRequests(left, right, filter.Sort, filter.Order)
+	})
+
+	total := len(items)
+	items = paginateMemoryOrderRequests(items, filter.Page, filter.Limit)
+	return items, total
+}
+
+func (repository *MemoryRepository) CreateOrderRequest(
+	orderID int64,
+	input domain.OrderRequestCreateInput,
+) (domain.OrderRequest, bool, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+
+	var order domain.Order
+	found := false
+	for _, item := range repository.orders {
+		if item.ID == orderID {
+			order = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		return domain.OrderRequest{}, false, nil
+	}
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	requestedAmount := order.Amount
+	if input.RequestedAmount != nil {
+		requestedAmount = *input.RequestedAmount
+	} else if strings.EqualFold(strings.TrimSpace(input.Type), string(domain.OrderRequestTypeCancel)) {
+		requestedAmount = 0
+	}
+
+	item := domain.OrderRequest{
+		ID:                    repository.nextOrderRequestID,
+		RequestNo:             fmt.Sprintf("REQ-%08d", repository.nextOrderRequestID),
+		OrderID:               order.ID,
+		OrderNo:               order.OrderNo,
+		CustomerID:            order.CustomerID,
+		CustomerName:          order.CustomerName,
+		ProductName:           order.ProductName,
+		Type:                  domain.OrderRequestType(strings.ToUpper(strings.TrimSpace(input.Type))),
+		Status:                domain.OrderRequestStatusPending,
+		Summary:               firstNonEmpty(input.Summary, order.ProductName+"业务申请"),
+		Reason:                strings.TrimSpace(input.Reason),
+		CurrentAmount:         order.Amount,
+		RequestedAmount:       requestedAmount,
+		CurrentBillingCycle:   order.BillingCycle,
+		RequestedBillingCycle: firstNonEmpty(input.RequestedBillingCycle, order.BillingCycle),
+		SourceType:            firstNonEmpty(strings.ToUpper(strings.TrimSpace(input.SourceType)), "ADMIN"),
+		SourceID:              input.SourceID,
+		SourceName:            firstNonEmpty(input.SourceName, "系统"),
+		Payload:               maps.Clone(input.Payload),
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}
+
+	repository.nextOrderRequestID++
+	repository.orderRequests = append([]domain.OrderRequest{item}, repository.orderRequests...)
+	return cloneOrderRequest(item), true, nil
+}
+
+func (repository *MemoryRepository) ProcessOrderRequest(
+	requestID int64,
+	input domain.OrderRequestProcessInput,
+) (domain.OrderRequest, bool, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+
+	for index, item := range repository.orderRequests {
+		if item.ID != requestID {
+			continue
+		}
+		if !canTransitionOrderRequestStatus(string(item.Status), input.Status) {
+			return domain.OrderRequest{}, false, fmt.Errorf("当前申请状态不允许继续处理")
+		}
+
+		now := time.Now().Format("2006-01-02 15:04:05")
+		item.Status = domain.OrderRequestStatus(strings.ToUpper(strings.TrimSpace(input.Status)))
+		item.ProcessNote = strings.TrimSpace(input.ProcessNote)
+		item.ProcessorType = firstNonEmpty(strings.ToUpper(strings.TrimSpace(input.ProcessorType)), "ADMIN")
+		item.ProcessorID = input.ProcessorID
+		item.ProcessorName = firstNonEmpty(input.ProcessorName, "系统")
+		item.ProcessedAt = now
+		item.UpdatedAt = now
+		repository.orderRequests[index] = item
+		return cloneOrderRequest(item), true, nil
+	}
+
+	return domain.OrderRequest{}, false, nil
+}
+
 func (repository *MemoryRepository) Checkout(
 	customerID int64,
 	customerName string,
@@ -1537,6 +1740,11 @@ func cloneServiceChange(link memoryServiceChangeLink) domain.ServiceChangeOrder 
 	}
 }
 
+func cloneOrderRequest(item domain.OrderRequest) domain.OrderRequest {
+	item.Payload = maps.Clone(item.Payload)
+	return item
+}
+
 func (repository *MemoryRepository) matchServiceChangeOrderLocked(item domain.ServiceChangeOrder, filter domain.ServiceChangeOrderListFilter) bool {
 	if filter.ServiceID > 0 && item.ServiceID != filter.ServiceID {
 		return false
@@ -1567,6 +1775,52 @@ func (repository *MemoryRepository) matchServiceChangeOrderLocked(item domain.Se
 		}
 	}
 	return true
+}
+
+func compareMemoryOrderRequests(left, right domain.OrderRequest, sortField, order string) int {
+	desc := strings.EqualFold(order, "desc")
+	switch strings.ToLower(strings.TrimSpace(sortField)) {
+	case "updated_at":
+		if result := compareString(left.UpdatedAt, right.UpdatedAt, desc); result != 0 {
+			return result
+		}
+		return compareByID(left.ID, right.ID, desc)
+	case "processed_at":
+		if result := compareString(left.ProcessedAt, right.ProcessedAt, desc); result != 0 {
+			return result
+		}
+		return compareByID(left.ID, right.ID, desc)
+	case "request_no":
+		if result := compareString(left.RequestNo, right.RequestNo, desc); result != 0 {
+			return result
+		}
+		return compareByID(left.ID, right.ID, desc)
+	default:
+		if result := compareString(left.CreatedAt, right.CreatedAt, desc); result != 0 {
+			return result
+		}
+		return compareByID(left.ID, right.ID, desc)
+	}
+}
+
+func canTransitionOrderRequestStatus(current, next string) bool {
+	current = strings.ToUpper(strings.TrimSpace(current))
+	next = strings.ToUpper(strings.TrimSpace(next))
+	if current == "" || next == "" || current == next {
+		return false
+	}
+
+	switch current {
+	case string(domain.OrderRequestStatusPending):
+		return next == string(domain.OrderRequestStatusApproved) ||
+			next == string(domain.OrderRequestStatusRejected) ||
+			next == string(domain.OrderRequestStatusCancelled)
+	case string(domain.OrderRequestStatusApproved):
+		return next == string(domain.OrderRequestStatusCompleted) ||
+			next == string(domain.OrderRequestStatusCancelled)
+	default:
+		return false
+	}
 }
 
 func (repository *MemoryRepository) memoryOrderNoLocked(orderID int64) string {
@@ -2193,6 +2447,24 @@ func paginateMemoryServiceChangeOrders(items []domain.ServiceChangeOrder, page, 
 	start := (page - 1) * limit
 	if start >= len(items) {
 		return []domain.ServiceChangeOrder{}
+	}
+	end := start + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end]
+}
+
+func paginateMemoryOrderRequests(items []domain.OrderRequest, page, limit int) []domain.OrderRequest {
+	if limit <= 0 {
+		return items
+	}
+	if page <= 0 {
+		page = 1
+	}
+	start := (page - 1) * limit
+	if start >= len(items) {
+		return []domain.OrderRequest{}
 	}
 	end := start + limit
 	if end > len(items) {

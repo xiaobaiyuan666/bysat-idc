@@ -8,10 +8,13 @@ import ContextTabs from "@/components/workbench/ContextTabs.vue";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import { useLocaleStore } from "@/store";
 import {
+  createOrderRequest,
   fetchOrderDetail,
   fetchProviderAccounts,
+  processOrderRequest,
   updatePendingOrder,
   type OrderDetailResponse,
+  type OrderRequestRecord,
   type ProviderAccount
 } from "@/api/admin";
 import {
@@ -57,9 +60,14 @@ const _legacyOrderStatusOptions = [
 const loading = ref(false);
 const savingEdit = ref(false);
 const savingLifecycle = ref(false);
+const savingRequest = ref(false);
+const savingRequestProcess = ref(false);
 const editDialogVisible = ref(false);
 const lifecycleDialogVisible = ref(false);
+const requestDialogVisible = ref(false);
+const requestProcessDialogVisible = ref(false);
 const detail = ref<OrderDetailResponse | null>(null);
+const activeRequest = ref<OrderRequestRecord | null>(null);
 const providerAccounts = ref<ProviderAccount[]>([]);
 const editForm = reactive({
   productName: "",
@@ -72,6 +80,17 @@ const editForm = reactive({
 const lifecycleForm = reactive({
   status: "ACTIVE",
   reason: ""
+});
+const requestForm = reactive({
+  type: "CANCEL",
+  summary: "",
+  reason: "",
+  requestedAmount: null as number | null,
+  requestedBillingCycle: ""
+});
+const requestProcessForm = reactive({
+  status: "APPROVED",
+  processNote: ""
 });
 
 const customerId = computed(() => detail.value?.order.customerId ?? 0);
@@ -120,6 +139,30 @@ const lifecycleActionOptions = computed(() =>
 const lifecycleNotice = computed(() => {
   const payStatus = primaryInvoice.value ? formatInvoiceStatus(localeStore.locale, primaryInvoice.value.status) : "无账单";
   return `当前订单状态 ${formatStatus(detail.value?.order.status || "PENDING")}，主账单 ${payStatus}，关联服务 ${detail.value?.services.length ?? 0} 个。`;
+});
+const orderRequestTypeOptions = [
+  { label: "取消申请", value: "CANCEL" },
+  { label: "续费请求", value: "RENEW" },
+  { label: "改价申请", value: "PRICE_ADJUST" }
+];
+const orderRequestProcessOptions = computed(() => {
+  if (!activeRequest.value) {
+    return [
+      { label: "同意申请", value: "APPROVED" },
+      { label: "驳回申请", value: "REJECTED" }
+    ];
+  }
+  if (activeRequest.value.status === "APPROVED") {
+    return [
+      { label: "处理完成", value: "COMPLETED" },
+      { label: "撤销申请", value: "CANCELLED" }
+    ];
+  }
+  return [
+    { label: "同意申请", value: "APPROVED" },
+    { label: "驳回申请", value: "REJECTED" },
+    { label: "撤销申请", value: "CANCELLED" }
+  ];
 });
 
 const contextTabs = computed(() => [
@@ -229,6 +272,37 @@ function formatAutomationType(type: string) {
 
 function formatProductTypeLabel(type: string) {
   return formatProductType(localeStore.locale, type);
+}
+
+function formatOrderRequestType(type: string) {
+  const mapping: Record<string, string> = {
+    CANCEL: "取消申请",
+    RENEW: "续费请求",
+    PRICE_ADJUST: "改价申请"
+  };
+  return mapping[type] ?? type;
+}
+
+function formatOrderRequestStatus(status: string) {
+  const mapping: Record<string, string> = {
+    PENDING: "待处理",
+    APPROVED: "已同意",
+    REJECTED: "已驳回",
+    COMPLETED: "已完成",
+    CANCELLED: "已撤销"
+  };
+  return mapping[status] ?? status;
+}
+
+function orderRequestStatusTagType(status: string) {
+  const mapping: Record<string, string> = {
+    PENDING: "warning",
+    APPROVED: "primary",
+    REJECTED: "danger",
+    COMPLETED: "success",
+    CANCELLED: "info"
+  };
+  return mapping[status] ?? "info";
 }
 
 function statusTagType(status: string) {
@@ -363,6 +437,90 @@ async function submitLifecycleAction() {
   }
 }
 
+function defaultRequestSummary(type: string) {
+  const productName = detail.value?.order.productName || "当前订单";
+  const mapping: Record<string, string> = {
+    CANCEL: `${productName}取消申请`,
+    RENEW: `${productName}续费请求`,
+    PRICE_ADJUST: `${productName}改价申请`
+  };
+  return mapping[type] ?? `${productName}业务申请`;
+}
+
+function openRequestDialog(type = "CANCEL") {
+  if (!detail.value) return;
+  requestForm.type = type;
+  requestForm.summary = defaultRequestSummary(type);
+  requestForm.reason = "";
+  requestForm.requestedBillingCycle = detail.value.order.billingCycle;
+  requestForm.requestedAmount = type === "CANCEL" ? 0 : detail.value.order.amount;
+  requestDialogVisible.value = true;
+}
+
+function closeRequestDialog() {
+  requestDialogVisible.value = false;
+  requestForm.reason = "";
+}
+
+async function submitOrderRequest() {
+  if (!detail.value) return;
+  savingRequest.value = true;
+  try {
+    const result = await createOrderRequest(detail.value.order.id, {
+      type: requestForm.type,
+      summary: requestForm.summary.trim() || defaultRequestSummary(requestForm.type),
+      reason: requestForm.reason.trim(),
+      requestedAmount:
+        requestForm.requestedAmount === null || Number.isNaN(Number(requestForm.requestedAmount))
+          ? undefined
+          : Number(requestForm.requestedAmount),
+      requestedBillingCycle: requestForm.requestedBillingCycle || undefined
+    });
+    detail.value = result;
+    requestDialogVisible.value = false;
+    ElMessage.success("订单申请已创建，已进入后台处理链路");
+  } finally {
+    savingRequest.value = false;
+  }
+}
+
+function defaultRequestProcessNote(request: OrderRequestRecord, status: string) {
+  if (status === "APPROVED") return `后台已同意${formatOrderRequestType(request.type)}`;
+  if (status === "REJECTED") return `后台驳回${formatOrderRequestType(request.type)}，待客户重新提交`;
+  if (status === "COMPLETED") return `${formatOrderRequestType(request.type)}已完成后续处理`;
+  if (status === "CANCELLED") return `${formatOrderRequestType(request.type)}已撤销`;
+  return "";
+}
+
+function openRequestProcessDialog(request: OrderRequestRecord, status?: string) {
+  activeRequest.value = request;
+  requestProcessForm.status = status || (request.status === "APPROVED" ? "COMPLETED" : "APPROVED");
+  requestProcessForm.processNote = defaultRequestProcessNote(request, requestProcessForm.status);
+  requestProcessDialogVisible.value = true;
+}
+
+function closeRequestProcessDialog() {
+  requestProcessDialogVisible.value = false;
+  activeRequest.value = null;
+  requestProcessForm.processNote = "";
+}
+
+async function submitRequestProcess() {
+  if (!activeRequest.value) return;
+  savingRequestProcess.value = true;
+  try {
+    const result = await processOrderRequest(activeRequest.value.id, {
+      status: requestProcessForm.status,
+      processNote: requestProcessForm.processNote.trim()
+    });
+    detail.value = result;
+    requestProcessDialogVisible.value = false;
+    ElMessage.success(`订单申请已更新为${formatOrderRequestStatus(requestProcessForm.status)}`);
+  } finally {
+    savingRequestProcess.value = false;
+  }
+}
+
 function parseTimelineTime(value: string) {
   if (!value) return 0;
   const parsed = Date.parse(value.includes("T") ? value : value.replace(" ", "T"));
@@ -462,6 +620,22 @@ function openProviderResourcesWorkbench() {
   openProviderResourcesContext();
 }
 
+function openOrderRequestWorkbench(options?: {
+  status?: string;
+  keyword?: string;
+  requestNo?: string;
+}) {
+  if (!detail.value) return;
+  void router.push({
+    path: "/orders/requests",
+    query: {
+      orderId: String(detail.value.order.id),
+      status: options?.status || undefined,
+      keyword: options?.keyword || options?.requestNo || undefined
+    }
+  });
+}
+
 function openOrderTimelineTarget(item: OrderTimelineItem) {
   if (!item.routePath) return;
   void router.push({
@@ -534,6 +708,25 @@ const orderTimeline = computed<OrderTimelineItem[]>(() => {
     });
   }
 
+  detail.value.requests.forEach(request => {
+    items.push({
+      key: `request-${request.id}`,
+      time: request.processedAt || request.createdAt,
+      title: `订单申请 ${request.requestNo}`,
+      description: `${formatOrderRequestType(request.type)}｜${formatOrderRequestStatus(request.status)}｜${request.summary || request.reason}`,
+      amount: request.requestedAmount,
+      tag: formatOrderRequestStatus(request.status),
+      tagType: orderRequestStatusTagType(request.status) as OrderTimelineItem["tagType"],
+      routePath: "/orders/requests",
+      routeQuery: {
+        orderId: String(request.orderId),
+        keyword: request.requestNo,
+        status: request.status
+      },
+      linkLabel: "打开订单申请工作台"
+    });
+  });
+
   detail.value.auditLogs.slice(0, 6).forEach(log => {
     items.push({
       key: `audit-${log.id}`,
@@ -595,6 +788,13 @@ const lifecycleAuditRows = computed(() =>
   )
 );
 
+const requestSummary = computed(() => ({
+  total: detail.value?.requests.length ?? 0,
+  pending: detail.value?.requests.filter(item => item.status === "PENDING").length ?? 0,
+  approved: detail.value?.requests.filter(item => item.status === "APPROVED").length ?? 0,
+  latestSource: detail.value?.requests[0]?.sourceName || "-"
+}));
+
 const auditSummary = computed(() => ({
   total: orderAuditRows.value.length,
   manualAdjustments: orderAuditRows.value.filter(row => row.action === "order.manual_adjust").length,
@@ -610,6 +810,14 @@ function summarizeAuditChanges(row: OrderAuditRow) {
     .map(change => `${change.label} ${change.before} -> ${change.after}`)
     .join("；");
 }
+
+watch(
+  () => requestProcessForm.status,
+  value => {
+    if (!activeRequest.value) return;
+    requestProcessForm.processNote = defaultRequestProcessNote(activeRequest.value, value);
+  }
+);
 
 watch(() => route.params.id, () => void loadDetail());
 
@@ -628,6 +836,8 @@ onMounted(async () => {
       <template #actions>
         <el-button @click="router.push('/orders/list')">返回列表</el-button>
         <el-button @click="loadDetail">刷新详情</el-button>
+        <el-button v-if="detail" plain @click="openOrderRequestWorkbench()">订单申请</el-button>
+        <el-button v-if="detail" plain @click="openRequestDialog('CANCEL')">创建申请</el-button>
         <el-button v-if="detail" type="primary" plain @click="openEditDialog">
           人工调整订单
         </el-button>
@@ -701,6 +911,10 @@ onMounted(async () => {
                     <span>审计记录</span>
                     <strong>{{ detail.auditLogs.length }}</strong>
                   </div>
+                  <div class="summary-pill">
+                    <span>订单申请</span>
+                    <strong>{{ requestSummary.total }}</strong>
+                  </div>
                 </div>
                 <el-alert
                   title="订单工作台负责串联支付、交付与同步状态。当前接口账户会直接决定后续自动化执行落到哪套魔方或上下游环境。"
@@ -736,6 +950,12 @@ onMounted(async () => {
                     >
                       {{ item.label }}
                     </el-button>
+                  </div>
+                  <div class="inline-actions" style="margin-top: 12px">
+                    <el-button plain @click="openOrderRequestWorkbench({ status: 'PENDING' })">待处理申请</el-button>
+                    <el-button type="primary" plain @click="openRequestDialog('CANCEL')">取消申请</el-button>
+                    <el-button type="primary" plain @click="openRequestDialog('RENEW')">续费请求</el-button>
+                    <el-button type="primary" plain @click="openRequestDialog('PRICE_ADJUST')">改价申请</el-button>
                   </div>
                 </div>
               </div>
@@ -870,6 +1090,82 @@ onMounted(async () => {
                 渠道资源
               </el-button>
             </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="订单申请">
+            <div class="summary-strip" style="margin-bottom: 16px">
+              <div class="summary-pill">
+                <span>申请总数</span>
+                <strong>{{ requestSummary.total }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>待处理</span>
+                <strong>{{ requestSummary.pending }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>已同意</span>
+                <strong>{{ requestSummary.approved }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>最近来源</span>
+                <strong>{{ requestSummary.latestSource }}</strong>
+              </div>
+            </div>
+            <div class="table-toolbar">
+              <div class="table-toolbar__meta">
+                <strong>订单申请工作台</strong>
+                <span>围绕取消、续费、改价等运营申请做登记和处理</span>
+              </div>
+              <div class="inline-actions">
+                <el-button plain @click="openOrderRequestWorkbench()">全局工作台</el-button>
+                <el-button plain @click="openRequestDialog('CANCEL')">取消申请</el-button>
+                <el-button plain @click="openRequestDialog('RENEW')">续费请求</el-button>
+                <el-button type="primary" plain @click="openRequestDialog('PRICE_ADJUST')">改价申请</el-button>
+              </div>
+            </div>
+            <el-table :data="detail.requests" border stripe empty-text="暂无订单申请">
+              <el-table-column prop="requestNo" label="申请单号" min-width="150" />
+              <el-table-column label="类型" min-width="120">
+                <template #default="{ row }">{{ formatOrderRequestType(row.type) }}</template>
+              </el-table-column>
+              <el-table-column prop="summary" label="摘要" min-width="220" show-overflow-tooltip />
+              <el-table-column label="申请内容" min-width="280" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ formatCycle(row.currentBillingCycle) }} / {{ formatCurrency(row.currentAmount) }} -> {{ formatCycle(row.requestedBillingCycle) }} / {{ formatCurrency(row.requestedAmount) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" min-width="120">
+                <template #default="{ row }">
+                  <el-tag :type="orderRequestStatusTagType(row.status)" effect="light">
+                    {{ formatOrderRequestStatus(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="sourceName" label="申请来源" min-width="140" />
+              <el-table-column prop="createdAt" label="申请时间" min-width="170" />
+              <el-table-column prop="processedAt" label="处理时间" min-width="170" />
+              <el-table-column label="操作" min-width="240" fixed="right">
+                <template #default="{ row }">
+                  <div class="inline-actions">
+                    <el-button type="primary" link @click="openOrderRequestWorkbench({ keyword: row.requestNo, status: row.status })">
+                      工作台
+                    </el-button>
+                    <el-button v-if="row.status === 'PENDING'" type="primary" link @click="openRequestProcessDialog(row, 'APPROVED')">
+                      同意
+                    </el-button>
+                    <el-button v-if="row.status === 'PENDING'" type="danger" link @click="openRequestProcessDialog(row, 'REJECTED')">
+                      驳回
+                    </el-button>
+                    <el-button v-if="row.status === 'APPROVED'" type="success" link @click="openRequestProcessDialog(row, 'COMPLETED')">
+                      完成
+                    </el-button>
+                    <el-button type="primary" link @click="openRequestProcessDialog(row)">
+                      处理
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
           </el-tab-pane>
 
           <el-tab-pane label="自动化任务">
@@ -1020,6 +1316,82 @@ onMounted(async () => {
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="savingEdit" @click="submitEditOrder">保存调整</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="requestDialogVisible" title="创建订单申请" width="560px" @closed="closeRequestDialog">
+      <el-form label-position="top">
+        <el-alert
+          title="订单申请适合登记取消、续费、改价等需要运营跟进的需求。"
+          description="创建后会进入订单申请工作台，后续同意、驳回、完成等动作都会写入审计。"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+        <el-form-item label="申请类型">
+          <el-select v-model="requestForm.type" style="width: 100%">
+            <el-option v-for="item in orderRequestTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="申请摘要">
+          <el-input v-model="requestForm.summary" placeholder="例如：客户申请取消本月订单、客户确认续费、销售申请首月优惠" />
+        </el-form-item>
+        <el-form-item label="申请原因">
+          <el-input
+            v-model="requestForm.reason"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入具体原因、客户诉求和需要后台处理的说明"
+          />
+        </el-form-item>
+        <el-form-item label="目标计费周期">
+          <el-select v-model="requestForm.requestedBillingCycle" style="width: 100%" clearable>
+            <el-option v-for="item in billingCycles" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="目标金额">
+          <el-input-number v-model="requestForm.requestedAmount" :min="0" :precision="2" :step="10" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeRequestDialog">取消</el-button>
+        <el-button type="primary" :loading="savingRequest" @click="submitOrderRequest">提交申请</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="requestProcessDialogVisible" title="处理订单申请" width="560px" @closed="closeRequestProcessDialog">
+      <el-form v-if="activeRequest" label-position="top">
+        <el-alert
+          :title="`${activeRequest.requestNo} · ${formatOrderRequestType(activeRequest.type)}`"
+          :description="`${activeRequest.summary}｜当前状态 ${formatOrderRequestStatus(activeRequest.status)}`"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+        <el-form-item label="处理结果">
+          <el-select v-model="requestProcessForm.status" style="width: 100%">
+            <el-option
+              v-for="item in orderRequestProcessOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="处理备注">
+          <el-input
+            v-model="requestProcessForm.processNote"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入处理结果、执行说明或需要继续跟进的备注"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeRequestProcessDialog">取消</el-button>
+        <el-button type="primary" :loading="savingRequestProcess" @click="submitRequestProcess">保存处理结果</el-button>
       </template>
     </el-dialog>
   </div>

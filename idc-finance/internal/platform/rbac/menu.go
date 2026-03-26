@@ -24,6 +24,7 @@ func PhaseOneMenus() []Menu {
 		{ID: 20, ParentID: 0, Title: "\u4e1a\u52a1", TitleEn: "Business", Name: "business", Path: "/orders/list", Icon: "Tickets", Permission: "order:view"},
 		{ID: 21, ParentID: 20, Title: "\u4ea7\u54c1\u8ba2\u5355", TitleEn: "Orders", Name: "order-list", Path: "/orders/list", Icon: "List", Permission: "order:view"},
 		{ID: 22, ParentID: 20, Title: "\u4e1a\u52a1\u5217\u8868", TitleEn: "Service List", Name: "service-list", Path: "/services/list", Icon: "DataLine", Permission: "service:view"},
+		{ID: 24, ParentID: 20, Title: "\u8ba2\u5355\u7533\u8bf7", TitleEn: "Order Requests", Name: "order-requests", Path: "/orders/requests", Icon: "Bell", Permission: "order:view"},
 		{ID: 23, ParentID: 20, Title: "\u6539\u914d\u5355", TitleEn: "Change Orders", Name: "service-change-orders", Path: "/orders/change-orders", Icon: "Files", Permission: "order:view"},
 
 		{ID: 30, ParentID: 0, Title: "\u8d22\u52a1", TitleEn: "Finance", Name: "finance", Path: "/billing/invoices", Icon: "Coin", Permission: "invoice:view"},

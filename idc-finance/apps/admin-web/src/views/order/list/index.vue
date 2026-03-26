@@ -7,6 +7,7 @@ import StatusTabs from "@/components/workbench/StatusTabs.vue";
 import { downloadCsv } from "@/utils/download";
 import {
   fetchOrders,
+  fetchOrderRequests,
   fetchProviderAccounts,
   updatePendingOrder,
   type OrderQuery,
@@ -26,6 +27,7 @@ const selectedRows = ref<OrderRecord[]>([]);
 const orders = ref<OrderRecord[]>([]);
 const total = ref(0);
 const providerAccounts = ref<ProviderAccount[]>([]);
+const pendingRequestCount = ref(0);
 const activeTab = ref<TabKey>("ALL");
 const quickActionVisible = ref(false);
 const quickActionLoading = ref(false);
@@ -118,10 +120,15 @@ function buildQuery(): OrderQuery {
 async function loadOrders() {
   loading.value = true;
   try {
-    const [orderData, accounts] = await Promise.all([fetchOrders(buildQuery()), fetchProviderAccounts()]);
+    const [orderData, accounts, pendingRequests] = await Promise.all([
+      fetchOrders(buildQuery()),
+      fetchProviderAccounts(),
+      fetchOrderRequests({ status: "PENDING", limit: 1, page: 1 })
+    ]);
     orders.value = orderData.items;
     total.value = orderData.total;
     providerAccounts.value = accounts;
+    pendingRequestCount.value = pendingRequests.total;
   } finally {
     loading.value = false;
   }
@@ -264,6 +271,15 @@ function openAutomationWorkbench(row: OrderRecord) {
   });
 }
 
+function openOrderRequestsWorkbench(orderId?: number) {
+  void router.push({
+    path: "/orders/requests",
+    query: {
+      orderId: orderId ? String(orderId) : undefined
+    }
+  });
+}
+
 function openQuickAction(status: LifecycleStatus, rows?: OrderRecord[]) {
   const targets = rows && rows.length > 0 ? rows : selectedRows.value;
   if (targets.length === 0) {
@@ -332,6 +348,9 @@ function handleRowAction(row: OrderRecord, command: string) {
       return;
     case "tasks":
       openAutomationWorkbench(row);
+      return;
+    case "requests":
+      openOrderRequestsWorkbench(row.id);
       return;
     case "pending":
       openQuickAction("PENDING", [row]);
@@ -492,6 +511,10 @@ watch(
             <span>自动化订单</span>
             <strong>{{ automatedCount }}</strong>
           </div>
+          <div class="summary-pill">
+            <span>待处理申请</span>
+            <strong>{{ pendingRequestCount }}</strong>
+          </div>
         </div>
       </template>
 
@@ -537,6 +560,7 @@ watch(
           <span>已选 {{ selectedRows.length }} 条</span>
         </div>
         <div class="action-group">
+          <el-button plain @click="openOrderRequestsWorkbench()">订单申请</el-button>
           <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('PENDING')">转待支付</el-button>
           <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('ACTIVE')">转待开通</el-button>
           <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('COMPLETED')">标记完成</el-button>
@@ -590,6 +614,7 @@ watch(
             <div class="inline-actions">
               <el-button type="primary" link @click="openDetail(row)">进入工作台</el-button>
               <el-button type="primary" link @click="openCustomerWorkbench(row)">客户</el-button>
+              <el-button type="primary" link @click="openOrderRequestsWorkbench(row.id)">申请</el-button>
               <el-dropdown @command="handleRowDropdownCommand(row, $event)">
                 <el-button type="primary" link>
                   更多
@@ -597,6 +622,7 @@ watch(
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item command="tasks">任务中心</el-dropdown-item>
+                    <el-dropdown-item command="requests">订单申请</el-dropdown-item>
                     <el-dropdown-item command="pending">转待支付</el-dropdown-item>
                     <el-dropdown-item command="active">转待开通</el-dropdown-item>
                     <el-dropdown-item command="completed">标记完成</el-dropdown-item>

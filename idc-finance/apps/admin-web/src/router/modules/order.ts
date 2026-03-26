@@ -16,6 +16,12 @@ export default {
       meta: { title: "\u4ea7\u54c1\u8ba2\u5355", titleEn: "Orders", requiresAuth: true }
     },
     {
+      path: "requests",
+      name: "order-requests",
+      component: () => import("@/views/order/requests/index.vue"),
+      meta: { title: "\u8ba2\u5355\u7533\u8bf7", titleEn: "Order Requests", requiresAuth: true }
+    },
+    {
       path: "change-orders",
       name: "service-change-orders",
       component: () => import("@/views/order/change-orders/index.vue"),

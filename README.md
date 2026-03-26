@@ -1,32 +1,27 @@
 # 无穷云IDC业务管理系统
 
-江苏白猿网络科技有限公司-猿创软件开发
+江苏白猿网络科技有限公司 - 猿创软件开发
 
-这个仓库当前的主线项目位于 [`idc-finance`](./idc-finance)。
+当前主线项目位于 [idc-finance](./idc-finance)。
 
-## 仓库定位
+## 你可以从这里开始
 
-- GitHub 用途是分发项目源码、迁移脚本、可选演示 seed 和安装文档。
-- 不提交本地开发环境状态，例如 `.env.local`、运行日志、`.runtime/`、`data/*.json`、本地数据库文件和临时二进制。
-- `seed/mysql` 中的内容是通用演示数据，不是本地真实测试环境快照。
+- [主项目说明](./idc-finance/README.md)
+- [源码安装说明](./idc-finance/docs/INSTALL.md)
+- [发布包安装说明](./idc-finance/docs/RELEASE.md)
+- [编译与使用手册](./idc-finance/docs/BUILD-AND-USAGE.md)
+- [前后端组件说明](./idc-finance/docs/COMPONENTS.md)
+- [MySQL 初始化说明](./idc-finance/docs/mysql-setup.md)
 
-## 主要项目
+## 当前仓库定位
 
-- 后端 API：`idc-finance/apps/api`
-- 管理后台：`idc-finance/apps/admin-web`
-- 用户中心：`idc-finance/apps/portal-web`
-- 业务模块：`idc-finance/internal`
-- 数据库迁移：`idc-finance/migrations/mysql`
-- 演示数据：`idc-finance/seed/mysql`
+这个仓库既可以：
 
-## 快速入口
+- 作为源码仓库继续开发
+- 作为编译仓库生成安装版
 
-- 项目说明：[idc-finance/README.md](./idc-finance/README.md)
-- GitHub 拉取安装说明：[idc-finance/docs/INSTALL.md](./idc-finance/docs/INSTALL.md)
-- MySQL 初始化说明：[idc-finance/docs/mysql-setup.md](./idc-finance/docs/mysql-setup.md)
+如果你只是想要直接可部署的版本，请进入 `idc-finance` 后执行：
 
-## 统一命名
-
-- 中文名称：`无穷云IDC业务管理系统`
-- 英文名称：`Infinity Cloud IDC Management System`
-- 开发标识：`江苏白猿网络科技有限公司-猿创软件开发`
+```bash
+npm run build:release
+```

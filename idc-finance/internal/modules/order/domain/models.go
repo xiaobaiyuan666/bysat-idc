@@ -38,6 +38,24 @@ const (
 	PaymentStatusCompleted PaymentStatus = "COMPLETED"
 )
 
+type OrderRequestType string
+
+const (
+	OrderRequestTypeCancel      OrderRequestType = "CANCEL"
+	OrderRequestTypeRenew       OrderRequestType = "RENEW"
+	OrderRequestTypePriceAdjust OrderRequestType = "PRICE_ADJUST"
+)
+
+type OrderRequestStatus string
+
+const (
+	OrderRequestStatusPending   OrderRequestStatus = "PENDING"
+	OrderRequestStatusApproved  OrderRequestStatus = "APPROVED"
+	OrderRequestStatusRejected  OrderRequestStatus = "REJECTED"
+	OrderRequestStatusCompleted OrderRequestStatus = "COMPLETED"
+	OrderRequestStatusCancelled OrderRequestStatus = "CANCELLED"
+)
+
 type AccountTransactionType string
 
 const (
@@ -148,6 +166,18 @@ type ServiceChangeOrderListFilter struct {
 	Keyword   string `json:"keyword"`
 }
 
+type OrderRequestListFilter struct {
+	Page       int    `json:"page"`
+	Limit      int    `json:"limit"`
+	Sort       string `json:"sort"`
+	Order      string `json:"order"`
+	OrderID    int64  `json:"orderId"`
+	CustomerID int64  `json:"customerId"`
+	Type       string `json:"type"`
+	Status     string `json:"status"`
+	Keyword    string `json:"keyword"`
+}
+
 type WalletAdjustment struct {
 	Target       string  `json:"target"`
 	Operation    string  `json:"operation"`
@@ -242,6 +272,55 @@ type ServiceChangeOrder struct {
 	RefundedAt   string         `json:"refundedAt"`
 	CreatedAt    string         `json:"createdAt"`
 	UpdatedAt    string         `json:"updatedAt"`
+}
+
+type OrderRequestCreateInput struct {
+	Type                 string         `json:"type"`
+	Summary              string         `json:"summary"`
+	Reason               string         `json:"reason"`
+	RequestedAmount      *float64       `json:"requestedAmount"`
+	RequestedBillingCycle string        `json:"requestedBillingCycle"`
+	SourceType           string         `json:"sourceType"`
+	SourceID             int64          `json:"sourceId"`
+	SourceName           string         `json:"sourceName"`
+	Payload              map[string]any `json:"payload"`
+}
+
+type OrderRequestProcessInput struct {
+	Status        string `json:"status"`
+	ProcessNote   string `json:"processNote"`
+	ProcessorType string `json:"processorType"`
+	ProcessorID   int64  `json:"processorId"`
+	ProcessorName string `json:"processorName"`
+}
+
+type OrderRequest struct {
+	ID                   int64              `json:"id"`
+	RequestNo            string             `json:"requestNo"`
+	OrderID              int64              `json:"orderId"`
+	OrderNo              string             `json:"orderNo"`
+	CustomerID           int64              `json:"customerId"`
+	CustomerName         string             `json:"customerName"`
+	ProductName          string             `json:"productName"`
+	Type                 OrderRequestType   `json:"type"`
+	Status               OrderRequestStatus `json:"status"`
+	Summary              string             `json:"summary"`
+	Reason               string             `json:"reason"`
+	CurrentAmount        float64            `json:"currentAmount"`
+	RequestedAmount      float64            `json:"requestedAmount"`
+	CurrentBillingCycle  string             `json:"currentBillingCycle"`
+	RequestedBillingCycle string            `json:"requestedBillingCycle"`
+	SourceType           string             `json:"sourceType"`
+	SourceID             int64              `json:"sourceId"`
+	SourceName           string             `json:"sourceName"`
+	ProcessorType        string             `json:"processorType"`
+	ProcessorID          int64              `json:"processorId"`
+	ProcessorName        string             `json:"processorName"`
+	ProcessNote          string             `json:"processNote"`
+	Payload              map[string]any     `json:"payload"`
+	CreatedAt            string             `json:"createdAt"`
+	UpdatedAt            string             `json:"updatedAt"`
+	ProcessedAt          string             `json:"processedAt"`
 }
 
 type ServiceProvisioningUpdate struct {

@@ -44,6 +44,7 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 	engine.Use(gin.Logger())
 	engine.Use(gin.Recovery())
 	engine.Use(middleware.RequestID())
+	registerCompiledWeb(engine, cfg.AdminWebDir, cfg.PortalWebDir)
 
 	auditService := buildAuditService(cfg, db)
 	taskService := buildAutomationService(cfg, db)
@@ -82,7 +83,7 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 			"message":   "healthy",
 			"requestId": middleware.GetRequestID(c),
 			"data": gin.H{
-				"service":       "idc-finance-api",
+				"service":       cfg.AppName,
 				"version":       "0.1.0",
 				"storageDriver": cfg.StorageDriver,
 				"mysqlReady":    db != nil,

@@ -16,7 +16,7 @@ import system from "./modules/system";
 import remaining from "./modules/remaining";
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: [workbench, customer, catalog, order, billing, ticket, service, provider, report, system, ...remaining]
 });
 
