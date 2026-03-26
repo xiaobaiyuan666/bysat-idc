@@ -1,0 +1,120 @@
+UPDATE customers
+SET balance = 1500.00, credit_limit = 5000.00, credit_used = 0.00
+WHERE id = 1;
+
+UPDATE customers
+SET balance = 300.00, credit_limit = 2000.00, credit_used = 0.00
+WHERE id = 2;
+
+INSERT INTO account_transactions (
+  id,
+  transaction_no,
+  customer_id,
+  transaction_type,
+  direction,
+  amount,
+  balance_before,
+  balance_after,
+  credit_before,
+  credit_after,
+  channel,
+  summary,
+  remark,
+  operator_type,
+  operator_id,
+  operator_name,
+  occurred_at
+)
+VALUES
+  (
+    1,
+    'ACT-00000001',
+    1,
+    'RECHARGE',
+    'IN',
+    2000.00,
+    0.00,
+    2000.00,
+    0.00,
+    0.00,
+    'OFFLINE',
+    '绾夸笅鍏呭€兼紨绀鸿祫閲?',
+    '鍒濆婕旂ず鍏呭€兼祦姘?',
+    'ADMIN',
+    1,
+    '绯荤粺',
+    '2026-03-18 10:00:00'
+  ),
+  (
+    2,
+    'ACT-00000002',
+    1,
+    'ADJUSTMENT',
+    'OUT',
+    500.00,
+    2000.00,
+    1500.00,
+    0.00,
+    0.00,
+    'SYSTEM',
+    '婕旂ず浣欓鎵嬪伐鎵ｆ',
+    '鐢ㄤ簬灞曠ず鍙拌处鏄庣粏',
+    'ADMIN',
+    1,
+    '绯荤粺',
+    '2026-03-19 14:30:00'
+  ),
+  (
+    3,
+    'ACT-00000003',
+    1,
+    'CREDIT_LIMIT',
+    'IN',
+    5000.00,
+    1500.00,
+    1500.00,
+    0.00,
+    5000.00,
+    'SYSTEM',
+    '寮€閫氫俊鐢ㄩ搴?',
+    '婕旂ず鎺堜俊棰濆害',
+    'ADMIN',
+    1,
+    '绯荤粺',
+    '2026-03-20 09:00:00'
+  ),
+  (
+    4,
+    'ACT-00000004',
+    2,
+    'RECHARGE',
+    'IN',
+    300.00,
+    0.00,
+    300.00,
+    0.00,
+    0.00,
+    'ALIPAY',
+    '绾夸笂鍏呭€兼紨绀鴻祫閲?',
+    '绗簩瀹㈡埛绀轰緥浣欓',
+    'PORTAL',
+    2,
+    '浜戣剦浜掕仈',
+    '2026-03-21 11:20:00'
+  )
+ON DUPLICATE KEY UPDATE
+  customer_id = VALUES(customer_id),
+  transaction_type = VALUES(transaction_type),
+  direction = VALUES(direction),
+  amount = VALUES(amount),
+  balance_before = VALUES(balance_before),
+  balance_after = VALUES(balance_after),
+  credit_before = VALUES(credit_before),
+  credit_after = VALUES(credit_after),
+  channel = VALUES(channel),
+  summary = VALUES(summary),
+  remark = VALUES(remark),
+  operator_type = VALUES(operator_type),
+  operator_id = VALUES(operator_id),
+  operator_name = VALUES(operator_name),
+  occurred_at = VALUES(occurred_at);

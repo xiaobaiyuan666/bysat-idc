@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"idc-finance/internal/modules/catalog/domain"
@@ -14,13 +15,23 @@ import (
 )
 
 type Service struct {
-	repository repository.Repository
-	audit      *audit.Service
-	provider   *providerService.Service
+	repository  repository.Repository
+	audit       *audit.Service
+	provider    *providerService.Service
+	historyMu   sync.RWMutex
+	history     upstreamImportHistoryState
+	historyFile string
 }
 
-func New(repo repository.Repository, auditService *audit.Service, provider *providerService.Service) *Service {
-	return &Service{repository: repo, audit: auditService, provider: provider}
+func New(repo repository.Repository, auditService *audit.Service, provider *providerService.Service, historyFile string) *Service {
+	service := &Service{
+		repository:  repo,
+		audit:       auditService,
+		provider:    provider,
+		historyFile: historyFile,
+	}
+	service.loadUpstreamImportHistory()
+	return service
 }
 
 func (service *Service) List() []domain.Product {
@@ -148,7 +159,7 @@ func (service *Service) SyncUpstream(
 
 	mapping := normalizeUpstreamMapping(request)
 	if mapping.ProviderType == "" || mapping.ProviderType == "NONE" {
-		mapping.ProviderType = firstNonEmpty(product.UpstreamMapping.ProviderType, "MOFANG_CLOUD")
+		mapping.ProviderType = firstNonEmpty(product.UpstreamMapping.ProviderType, "ZJMF_API")
 	}
 	if mapping.SourceName == "" {
 		mapping.SourceName = firstNonEmpty(product.UpstreamMapping.SourceName, defaultSourceName(mapping.ProviderType))
@@ -286,7 +297,14 @@ func (service *Service) ImportUpstreamProducts(
 	adminID int64,
 	adminName,
 	requestID string,
-) (dto.ImportUpstreamProductsResponse, error) {
+) (response dto.ImportUpstreamProductsResponse, err error) {
+	startedAt := time.Now()
+	defer func() {
+		historyID := service.recordUpstreamImportHistory(request, response, err, startedAt, time.Now())
+		if err == nil && historyID != "" {
+			response.HistoryID = historyID
+		}
+	}()
 	if service.provider == nil {
 		return dto.ImportUpstreamProductsResponse{}, fmt.Errorf("未初始化上游接口服务")
 	}
@@ -325,6 +343,10 @@ func (service *Service) ImportUpstreamProducts(
 	autoSyncPricing := request.AutoSyncPricing || (!request.AutoSyncConfig && !request.AutoSyncTemplate && !request.AutoSyncPricing)
 	autoSyncConfig := request.AutoSyncConfig || (!request.AutoSyncConfig && !request.AutoSyncTemplate && !request.AutoSyncPricing)
 	autoSyncTemplate := request.AutoSyncTemplate || (!request.AutoSyncConfig && !request.AutoSyncTemplate && !request.AutoSyncPricing)
+	providerType := strings.ToUpper(strings.TrimSpace(request.ProviderType))
+	if providerType == "" {
+		providerType = "ZJMF_API"
+	}
 	now := time.Now().Format(time.RFC3339)
 
 	products := service.repository.List()
@@ -332,20 +354,28 @@ func (service *Service) ImportUpstreamProducts(
 	importedCount := 0
 	updatedCount := 0
 	failedCount := 0
+	deactivatedCount := 0
+	remoteCodes := make(map[string]struct{})
 
 	for _, group := range groups {
 		for _, remoteProduct := range group.Products {
+			remoteProductCode := strings.TrimSpace(remoteProduct.RemoteProductCode)
+			if remoteProductCode == "" {
+				continue
+			}
+			remoteCodes[remoteProductCode] = struct{}{}
+
 			if !request.ImportAll {
-				if _, ok := selectedCodes[strings.TrimSpace(remoteProduct.RemoteProductCode)]; !ok {
+				if _, ok := selectedCodes[remoteProductCode]; !ok {
 					continue
 				}
 			}
 
-			template, templateErr := service.provider.GetUpstreamProductTemplate(remoteProduct.RemoteProductCode, request.ProviderAccountID)
+			template, templateErr := service.provider.GetUpstreamProductTemplate(remoteProductCode, request.ProviderAccountID)
 			if templateErr != nil {
 				failedCount++
 				items = append(items, dto.ImportUpstreamProductItem{
-					RemoteProductCode: remoteProduct.RemoteProductCode,
+					RemoteProductCode: remoteProductCode,
 					RemoteProductName: firstNonEmpty(template.Name, remoteProduct.Name),
 					GroupName:         firstNonEmpty(template.GroupName, remoteProduct.GroupName, group.GroupName),
 					Status:            "FAILED",
@@ -355,8 +385,19 @@ func (service *Service) ImportUpstreamProducts(
 				continue
 			}
 
-			existing, exists := findProductByUpstreamMapping(products, request.ProviderAccountID, "ZJMF_API", remoteProduct.RemoteProductCode)
-			product := service.buildImportedProduct(existing, exists, remoteProduct, template, request.ProviderAccountID, autoSyncPricing, autoSyncConfig, autoSyncTemplate, now)
+			existing, exists := findProductByUpstreamMapping(products, request.ProviderAccountID, providerType, remoteProductCode)
+			product := service.buildImportedProduct(
+				existing,
+				exists,
+				remoteProduct,
+				template,
+				request.ProviderAccountID,
+				providerType,
+				autoSyncPricing,
+				autoSyncConfig,
+				autoSyncTemplate,
+				now,
+			)
 
 			var (
 				saved   domain.Product
@@ -408,14 +449,14 @@ func (service *Service) ImportUpstreamProducts(
 				Description: "从上游财务导入商品模板、价格矩阵、配置项和云模板",
 				Payload: map[string]any{
 					"providerAccountId": request.ProviderAccountID,
-					"providerType":      "ZJMF_API",
-					"remoteProductCode": remoteProduct.RemoteProductCode,
+					"providerType":      providerType,
+					"remoteProductCode": remoteProductCode,
 					"operation":         action,
 				},
 			})
 
 			items = append(items, dto.ImportUpstreamProductItem{
-				RemoteProductCode: remoteProduct.RemoteProductCode,
+				RemoteProductCode: remoteProductCode,
 				RemoteProductName: saved.Name,
 				GroupName:         saved.GroupName,
 				ProductID:         saved.ID,
@@ -427,18 +468,95 @@ func (service *Service) ImportUpstreamProducts(
 		}
 	}
 
+	if request.ImportAll && request.DeactivateMissing {
+		for index, product := range products {
+			if product.UpstreamMapping.ProviderAccountID != request.ProviderAccountID {
+				continue
+			}
+			if !strings.EqualFold(strings.TrimSpace(product.UpstreamMapping.ProviderType), providerType) {
+				continue
+			}
+
+			remoteProductCode := strings.TrimSpace(product.UpstreamMapping.RemoteProductCode)
+			if remoteProductCode == "" {
+				continue
+			}
+			if _, exists := remoteCodes[remoteProductCode]; exists {
+				continue
+			}
+			if product.Status == domain.ProductStatusInactive && strings.EqualFold(strings.TrimSpace(product.UpstreamMapping.SyncStatus), "STALE") {
+				continue
+			}
+
+			product.Status = domain.ProductStatusInactive
+			product.UpstreamMapping.ProviderType = providerType
+			product.UpstreamMapping.SourceName = firstNonEmpty(strings.TrimSpace(product.UpstreamMapping.SourceName), defaultSourceName(providerType))
+			product.UpstreamMapping.SyncStatus = "STALE"
+			product.UpstreamMapping.SyncMessage = "远端商品已不存在，系统已自动停用本地商品"
+			product.UpstreamMapping.LastSyncedAt = now
+
+			saved, ok := service.repository.Update(product.ID, product)
+			if !ok {
+				failedCount++
+				items = append(items, dto.ImportUpstreamProductItem{
+					RemoteProductCode: remoteProductCode,
+					RemoteProductName: product.Name,
+					GroupName:         product.GroupName,
+					ProductID:         product.ID,
+					ProductNo:         product.ProductNo,
+					Status:            "FAILED",
+					Operation:         "deactivate",
+					Message:           "本地下线失败",
+				})
+				continue
+			}
+
+			deactivatedCount++
+			products[index] = saved
+
+			service.audit.Record(audit.Entry{
+				ActorType:   "ADMIN",
+				ActorID:     adminID,
+				Actor:       adminName,
+				Action:      "catalog.product.deactivate_missing_upstream",
+				TargetType:  "product",
+				TargetID:    saved.ID,
+				Target:      saved.ProductNo,
+				RequestID:   requestID,
+				Description: "远端商品已不存在，系统自动停用本地上游映射商品",
+				Payload: map[string]any{
+					"providerAccountId": request.ProviderAccountID,
+					"providerType":      providerType,
+					"remoteProductCode": remoteProductCode,
+				},
+			})
+
+			items = append(items, dto.ImportUpstreamProductItem{
+				RemoteProductCode: remoteProductCode,
+				RemoteProductName: saved.Name,
+				GroupName:         saved.GroupName,
+				ProductID:         saved.ID,
+				ProductNo:         saved.ProductNo,
+				Status:            "SUCCESS",
+				Operation:         "deactivate",
+				Message:           "远端商品已不存在，本地商品已自动停用",
+			})
+		}
+	}
+
 	return dto.ImportUpstreamProductsResponse{
 		ProviderAccountID: request.ProviderAccountID,
 		ImportedCount:     importedCount,
 		UpdatedCount:      updatedCount,
 		FailedCount:       failedCount,
+		DeactivatedCount:  deactivatedCount,
 		Items:             items,
-		Total:             importedCount + updatedCount,
+		Total:             importedCount + updatedCount + deactivatedCount,
 		Created:           importedCount,
 		Updated:           updatedCount,
 		Skipped:           0,
 		Failed:            failedCount,
-		Message:           fmt.Sprintf("上游商品导入完成，新增 %d，更新 %d，失败 %d", importedCount, updatedCount, failedCount),
+		Message:           fmt.Sprintf("上游商品导入完成，新增 %d，更新 %d，停用 %d，失败 %d", importedCount, updatedCount, deactivatedCount, failedCount),
 	}, nil
 }
 
@@ -496,6 +614,7 @@ func (service *Service) buildImportedProduct(
 	remoteProduct providerService.UpstreamCatalogProduct,
 	template providerService.UpstreamProductTemplate,
 	providerAccountID int64,
+	providerType string,
 	autoSyncPricing,
 	autoSyncConfig,
 	autoSyncTemplate bool,
@@ -518,9 +637,9 @@ func (service *Service) buildImportedProduct(
 		product.ResourceTemplate = deriveResourceTemplate(product.ResourceTemplate, template.ConfigOptions)
 	}
 
-	product.AutomationConfig = deriveAutomationConfig(product.AutomationConfig, "ZJMF_API", product.ProductType)
+	product.AutomationConfig = deriveAutomationConfig(product.AutomationConfig, providerType, product.ProductType)
 	product.AutomationConfig.ProviderAccountID = providerAccountID
-	product.AutomationConfig.Channel = "ZJMF_API"
+	product.AutomationConfig.Channel = providerType
 	product.AutomationConfig.AutoProvision = true
 	if strings.TrimSpace(product.AutomationConfig.ProvisionStage) == "" {
 		product.AutomationConfig.ProvisionStage = "AFTER_PAYMENT"
@@ -528,8 +647,8 @@ func (service *Service) buildImportedProduct(
 
 	product.UpstreamMapping = domain.UpstreamMapping{
 		ProviderAccountID: providerAccountID,
-		ProviderType:      "ZJMF_API",
-		SourceName:        firstNonEmpty(strings.TrimSpace(template.GroupName), strings.TrimSpace(remoteProduct.GroupName), "上游财务"),
+		ProviderType:      providerType,
+		SourceName:        firstNonEmpty(strings.TrimSpace(existing.UpstreamMapping.SourceName), defaultSourceName(providerType)),
 		RemoteProductCode: strings.TrimSpace(remoteProduct.RemoteProductCode),
 		RemoteProductName: firstNonEmpty(strings.TrimSpace(template.Name), strings.TrimSpace(remoteProduct.Name)),
 		PricePolicy:       "FOLLOW_UPSTREAM",
@@ -537,7 +656,7 @@ func (service *Service) buildImportedProduct(
 		AutoSyncConfig:    autoSyncConfig,
 		AutoSyncTemplate:  autoSyncTemplate,
 		SyncStatus:        "SUCCESS",
-		SyncMessage:       "已从上游财务导入模板",
+		SyncMessage:       fmt.Sprintf("已从 %s 导入模板", defaultSourceName(providerType)),
 		LastSyncedAt:      syncedAt,
 	}
 
@@ -777,6 +896,8 @@ func defaultSourceName(providerType string) string {
 		return "魔方云"
 	case "ZJMF_API":
 		return "上下游财务"
+	case "WHMCS":
+		return "WHMCS"
 	case "MANUAL":
 		return "手动资源池"
 	default:

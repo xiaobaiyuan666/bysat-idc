@@ -58,6 +58,20 @@ export function formatPortalInvoiceStatus(locale: LocaleCode, status: string | u
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(status);
 }
 
+export function formatPortalPaymentChannel(locale: LocaleCode, channel: string | undefined) {
+  const mapping: Record<string, [string, string]> = {
+    OFFLINE: ["线下汇款", "Offline Transfer"],
+    MANUAL: ["线下收款", "Manual Payment"],
+    ALIPAY: ["支付宝", "Alipay"],
+    WECHAT: ["微信支付", "WeChat Pay"],
+    BALANCE: ["余额抵扣", "Balance"],
+    ONLINE: ["在线支付", "Online Payment"],
+    SYSTEM: ["系统处理", "System"]
+  };
+  const pair = mapping[String(channel ?? "")];
+  return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(channel);
+}
+
 export function formatPortalServiceStatus(locale: LocaleCode, status: string | undefined) {
   const mapping: Record<string, [string, string]> = {
     PENDING: ["待开通", "Pending"],

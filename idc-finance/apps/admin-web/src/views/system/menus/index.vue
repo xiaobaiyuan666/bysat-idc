@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, reactive } from "vue";
+import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import { usePermissionStore } from "@/store";
 
 type MenuNode = {
@@ -14,6 +15,11 @@ type MenuNode = {
 };
 
 const permissionStore = usePermissionStore();
+
+const filters = reactive({
+  keyword: ""
+});
+
 const items = computed(() => permissionStore.menus as MenuNode[]);
 
 function countNodes(nodes: MenuNode[]): number {
@@ -34,35 +40,69 @@ function countPermissions(nodes: MenuNode[]): number {
   }, 0);
 }
 
+function filterTree(nodes: MenuNode[], keyword: string): MenuNode[] {
+  if (!keyword) return nodes;
+  return nodes
+    .map(item => {
+      const children = filterTree(item.children ?? [], keyword);
+      const selfMatched =
+        item.title.toLowerCase().includes(keyword) ||
+        item.path.toLowerCase().includes(keyword) ||
+        item.permission.toLowerCase().includes(keyword);
+      if (!selfMatched && children.length === 0) return null;
+      return {
+        ...item,
+        children
+      };
+    })
+    .filter(Boolean) as MenuNode[];
+}
+
+const filteredItems = computed(() => filterTree(items.value, filters.keyword.trim().toLowerCase()));
 const rootCount = computed(() => items.value.length);
 const nodeCount = computed(() => countNodes(items.value));
 const leafCount = computed(() => countLeaves(items.value));
 const permissionCount = computed(() => countPermissions(items.value));
+
+onMounted(() => {
+  if (!permissionStore.menus.length || !permissionStore.permissions.length) {
+    void permissionStore.load();
+  }
+});
 </script>
 
 <template>
-  <div class="page-card">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">菜单管理</h1>
-        <p class="page-subtitle">
-          当前菜单来自后端菜单接口，用于验证动态菜单链路。这里展示菜单树、路由路径和权限点。
-        </p>
+  <PageWorkbench
+    eyebrow="系统 / 菜单"
+    title="菜单权限工作台"
+    subtitle="查看后台菜单树、路由路径和权限点，便于角色授权时核对。"
+  >
+    <template #metrics>
+      <div class="summary-strip">
+        <div class="summary-pill"><span>一级菜单</span><strong>{{ rootCount }}</strong></div>
+        <div class="summary-pill"><span>菜单节点</span><strong>{{ nodeCount }}</strong></div>
+        <div class="summary-pill"><span>叶子节点</span><strong>{{ leafCount }}</strong></div>
+        <div class="summary-pill"><span>权限点</span><strong>{{ permissionCount }}</strong></div>
       </div>
-    </div>
+    </template>
 
-    <div class="summary-strip">
-      <div class="summary-pill"><span>一级菜单</span><strong>{{ rootCount }}</strong></div>
-      <div class="summary-pill"><span>菜单节点</span><strong>{{ nodeCount }}</strong></div>
-      <div class="summary-pill"><span>叶子节点</span><strong>{{ leafCount }}</strong></div>
-      <div class="summary-pill"><span>权限点</span><strong>{{ permissionCount }}</strong></div>
-    </div>
+    <template #filters>
+      <div class="filter-bar">
+        <el-input v-model="filters.keyword" clearable placeholder="搜索菜单标题、路由或权限点" />
+      </div>
+    </template>
 
-    <el-table :data="items" row-key="id" border default-expand-all>
-      <el-table-column prop="title" label="菜单标题" min-width="180" />
-      <el-table-column prop="path" label="路由路径" min-width="220" />
-      <el-table-column prop="permission" label="权限点" min-width="220" />
-      <el-table-column prop="icon" label="图标" min-width="140" />
-    </el-table>
-  </div>
+    <div class="panel-card">
+      <div class="section-card__head">
+        <strong>菜单树</strong>
+        <span class="section-card__meta">当前匹配 {{ countNodes(filteredItems) }} 个节点</span>
+      </div>
+      <el-table :data="filteredItems" row-key="id" border default-expand-all>
+        <el-table-column prop="title" label="菜单标题" min-width="180" />
+        <el-table-column prop="path" label="路由路径" min-width="220" />
+        <el-table-column prop="permission" label="权限点" min-width="220" />
+        <el-table-column prop="icon" label="图标" min-width="120" />
+      </el-table>
+    </div>
+  </PageWorkbench>
 </template>

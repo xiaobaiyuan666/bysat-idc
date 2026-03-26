@@ -1,5 +1,8 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useUserStore, useMultiTagsStore } from "@/store";
+import { useLocaleStore } from "@/store/modules/locale";
+import { useSettingsStore } from "@/store/modules/settings";
+import { resolveMetaTitle } from "@/locales";
 import consoleRoute from "./modules/console";
 import storeRoute from "./modules/store";
 import servicesRoute from "./modules/services";
@@ -40,6 +43,13 @@ router.beforeEach(to => {
 });
 
 router.afterEach(to => {
+  const localeStore = useLocaleStore();
+  const settingsStore = useSettingsStore();
+  const pageTitle = resolveMetaTitle(to.meta, localeStore.locale, settingsStore.title, settingsStore.titleEn);
+  if (typeof document !== "undefined") {
+    document.title = pageTitle === settingsStore.title ? settingsStore.title : `${pageTitle} - ${settingsStore.title}`;
+  }
+
   if (to.meta?.title && to.path !== "/login") {
     useMultiTagsStore().push({
       title: String(to.meta.title),

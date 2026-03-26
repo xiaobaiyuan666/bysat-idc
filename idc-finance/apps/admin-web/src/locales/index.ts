@@ -29,7 +29,7 @@ export function resolveMetaTitle(
 
 export function isLegacyMojibake(value: string | undefined) {
   if (!value) return false;
-  return /[鍚绯閫鐧璐瀹鎺婕宸]/.test(value) || value.includes("??") || value.includes("�");
+  return /[閸氱化闁惂鐠愮€归幒濠曞]/.test(value) || value.includes("??") || value.includes("锟");
 }
 
 export const elementLocales = {

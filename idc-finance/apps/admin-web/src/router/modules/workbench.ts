@@ -5,7 +5,7 @@ export default {
   name: "workbench",
   component: () => import("@/views/workbench/index.vue"),
   meta: {
-    title: "工作台",
+    title: "\u5de5\u4f5c\u53f0",
     titleEn: "Workbench",
     requiresAuth: true
   }

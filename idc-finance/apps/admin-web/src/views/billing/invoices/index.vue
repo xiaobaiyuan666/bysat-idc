@@ -1,17 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import StatusTabs from "@/components/workbench/StatusTabs.vue";
 import { downloadCsv } from "@/utils/download";
-import { fetchInvoices, type InvoiceQuery, type InvoiceRecord } from "@/api/admin";
+import {
+  fetchCustomers,
+  fetchInvoices,
+  type Customer,
+  type InvoiceQuery,
+  type InvoiceRecord
+} from "@/api/admin";
 
 type TabKey = "ALL" | "UNPAID" | "PAID" | "REFUNDED";
 
+const route = useRoute();
 const router = useRouter();
 
 const loading = ref(false);
+const customers = ref<Customer[]>([]);
 const invoices = ref<InvoiceRecord[]>([]);
 const total = ref(0);
 const selectedRows = ref<InvoiceRecord[]>([]);
@@ -19,6 +27,7 @@ const activeTab = ref<TabKey>("ALL");
 const advancedVisible = ref(false);
 
 const filters = reactive({
+  customerId: undefined as number | undefined,
   keyword: "",
   orderNo: "",
   productName: "",
@@ -46,6 +55,31 @@ const currentReceivable = computed(() =>
     .reduce((sum, item) => sum + item.totalAmount, 0)
 );
 
+function hydrateFiltersFromRoute() {
+  const customerId = Number(route.query.customerId ?? route.query.uid);
+  if (Number.isFinite(customerId) && customerId > 0) {
+    filters.customerId = customerId;
+  }
+
+  const status = String(route.query.status ?? "").toUpperCase();
+  if (status === "UNPAID" || status === "PAID" || status === "REFUNDED") {
+    activeTab.value = status as TabKey;
+  }
+
+  if (route.query.invoiceNo) {
+    filters.keyword = String(route.query.invoiceNo);
+  }
+  if (route.query.orderNo) {
+    filters.orderNo = String(route.query.orderNo);
+  }
+  if (route.query.productName) {
+    filters.productName = String(route.query.productName);
+  }
+  if (route.query.billingCycle) {
+    filters.cycle = String(route.query.billingCycle);
+  }
+}
+
 function buildQuery(): InvoiceQuery {
   const query: InvoiceQuery = {
     page: pagination.page,
@@ -53,12 +87,18 @@ function buildQuery(): InvoiceQuery {
     sort: "created_at",
     order: "desc"
   };
+  if (filters.customerId) query.uid = filters.customerId;
   if (activeTab.value !== "ALL") query.status = activeTab.value;
   if (filters.keyword.trim()) query.invoice_no = filters.keyword.trim();
   if (filters.orderNo.trim()) query.order_no = filters.orderNo.trim();
   if (filters.productName.trim()) query.product_name = filters.productName.trim();
   if (filters.cycle) query.billing_cycle = filters.cycle;
   return query;
+}
+
+async function loadCustomers() {
+  const data = await fetchCustomers();
+  customers.value = data.items;
 }
 
 async function loadInvoices() {
@@ -74,6 +114,7 @@ async function loadInvoices() {
 
 function resetFilters() {
   activeTab.value = "ALL";
+  filters.customerId = undefined;
   filters.keyword = "";
   filters.orderNo = "";
   filters.productName = "";
@@ -126,6 +167,10 @@ function statusTagType(value: string) {
   return mapping[value] ?? "info";
 }
 
+function customerName(customerId: number) {
+  return customers.value.find(item => item.id === customerId)?.name ?? `客户 #${customerId}`;
+}
+
 async function copySelectedInvoiceNos() {
   if (selectedRows.value.length === 0) {
     ElMessage.info("请先选择账单");
@@ -138,10 +183,11 @@ async function copySelectedInvoiceNos() {
 function exportRows(rows: InvoiceRecord[], filename: string) {
   downloadCsv(
     filename,
-    ["账单编号", "订单编号", "商品名称", "计费周期", "账单金额", "账单状态", "到期时间", "支付时间"],
+    ["账单编号", "订单编号", "客户", "商品名称", "计费周期", "账单金额", "账单状态", "到期时间", "支付时间"],
     rows.map(item => [
       item.invoiceNo,
       item.orderNo,
+      customerName(item.customerId),
       item.productName,
       formatCycle(item.billingCycle),
       formatCurrency(item.totalAmount),
@@ -166,6 +212,10 @@ function exportSelected() {
   ElMessage.success("已导出选中账单");
 }
 
+function openCustomer(customerId: number) {
+  void router.push(`/customer/detail/${customerId}`);
+}
+
 function openDetail(row: InvoiceRecord) {
   void router.push(`/billing/invoices/${row.id}`);
 }
@@ -175,8 +225,10 @@ watch(activeTab, () => {
   void loadInvoices();
 });
 
-onMounted(() => {
-  void loadInvoices();
+onMounted(async () => {
+  hydrateFiltersFromRoute();
+  await loadCustomers();
+  await loadInvoices();
 });
 </script>
 
@@ -185,7 +237,7 @@ onMounted(() => {
     <PageWorkbench
       eyebrow="财务 / 账单"
       title="账单列表"
-      subtitle="集中查看应收账单、支付状态、到期时间和退款状态，作为收款与退款的统一入口。"
+      subtitle="集中查看应收账单、支付状态、到期时间和退款状态，支持按客户上下文联查。"
     >
       <template #actions>
         <el-button @click="loadInvoices">刷新列表</el-button>
@@ -217,6 +269,9 @@ onMounted(() => {
         <StatusTabs v-model="activeTab" :items="statusTabs" />
 
         <div class="filter-bar">
+          <el-select v-model="filters.customerId" placeholder="选择客户" clearable filterable>
+            <el-option v-for="item in customers" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
           <el-input v-model="filters.keyword" placeholder="账单编号" clearable />
           <el-select v-model="filters.cycle" placeholder="计费周期" clearable>
             <el-option label="月付" value="monthly" />
@@ -241,7 +296,7 @@ onMounted(() => {
 
       <div class="table-toolbar">
         <div class="table-toolbar__meta">
-          <strong>财务列表</strong>
+          <strong>账单列表</strong>
           <span>当前页 {{ invoices.length }} 条</span>
           <span>已选 {{ selectedRows.length }} 条</span>
         </div>
@@ -262,7 +317,14 @@ onMounted(() => {
         <el-table-column type="selection" width="48" />
         <el-table-column prop="invoiceNo" label="账单编号" min-width="170" />
         <el-table-column prop="orderNo" label="订单编号" min-width="170" />
-        <el-table-column prop="productName" label="商品名称" min-width="240" show-overflow-tooltip />
+        <el-table-column label="客户" min-width="180">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openCustomer(row.customerId)">
+              {{ customerName(row.customerId) }}
+            </el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="productName" label="商品名称" min-width="220" show-overflow-tooltip />
         <el-table-column label="计费周期" min-width="100">
           <template #default="{ row }">{{ formatCycle(row.billingCycle) }}</template>
         </el-table-column>

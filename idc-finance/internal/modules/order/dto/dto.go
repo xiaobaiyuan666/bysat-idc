@@ -71,6 +71,14 @@ type ServiceActionRequest struct {
 	Password  string `json:"password"`
 }
 
+type AdjustWalletRequest struct {
+	Target    string  `json:"target"`
+	Operation string  `json:"operation"`
+	Amount    float64 `json:"amount"`
+	Summary   string  `json:"summary"`
+	Remark    string  `json:"remark"`
+}
+
 type OrderListResponse struct {
 	Items []domain.Order `json:"items"`
 	Total int            `json:"total"`
@@ -84,6 +92,36 @@ type InvoiceListResponse struct {
 type ServiceListResponse struct {
 	Items []domain.ServiceRecord `json:"items"`
 	Total int                    `json:"total"`
+}
+
+type AccountTransactionListResponse struct {
+	Items []domain.AccountTransaction `json:"items"`
+	Total int                         `json:"total"`
+}
+
+type PaymentListResponse struct {
+	Items []domain.PaymentRecord `json:"items"`
+	Total int                    `json:"total"`
+}
+
+type RefundListResponse struct {
+	Items []domain.RefundRecord `json:"items"`
+	Total int                   `json:"total"`
+}
+
+type ServiceChangeOrderListResponse struct {
+	Items []ServiceChangeOrderRecord `json:"items"`
+	Total int                        `json:"total"`
+}
+
+type CustomerWalletResponse struct {
+	Wallet       domain.CustomerWallet       `json:"wallet"`
+	Transactions []domain.AccountTransaction `json:"transactions"`
+}
+
+type AdjustWalletResponse struct {
+	Wallet      domain.CustomerWallet     `json:"wallet"`
+	Transaction domain.AccountTransaction `json:"transaction"`
 }
 
 type CheckoutResponse struct {
@@ -126,10 +164,13 @@ type CreateServiceChangeOrderResponse struct {
 type ServiceChangeOrderRecord struct {
 	ID               int64                  `json:"id"`
 	ServiceID        int64                  `json:"serviceId"`
+	ServiceNo        string                 `json:"serviceNo"`
 	OrderID          int64                  `json:"orderId"`
 	OrderNo          string                 `json:"orderNo"`
 	InvoiceID        int64                  `json:"invoiceId"`
 	InvoiceNo        string                 `json:"invoiceNo"`
+	ProductName      string                 `json:"productName"`
+	ProviderType     string                 `json:"providerType"`
 	ActionName       string                 `json:"actionName"`
 	Title            string                 `json:"title"`
 	Amount           float64                `json:"amount"`

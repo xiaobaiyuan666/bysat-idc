@@ -61,11 +61,74 @@ export interface PortalService {
   id: number;
   serviceNo: string;
   customerId: number;
+  orderId: number;
+  invoiceId: number;
   productName: string;
   status: string;
   nextDueAt: string;
   createdAt: string;
+  providerType?: string;
   configuration?: PortalServiceConfigSelection[];
+}
+
+export interface PortalServiceResourceSnapshot {
+  regionName: string;
+  zoneName: string;
+  hostname: string;
+  operatingSystem: string;
+  loginUsername: string;
+  passwordHint: string;
+  securityGroup: string;
+  cpuCores: number;
+  memoryGB: number;
+  systemDiskGB: number;
+  dataDiskGB: number;
+  bandwidthMbps: number;
+  publicIpv4: string;
+  publicIpv6: string;
+}
+
+export interface PortalServiceDetailRecord extends PortalService {
+  providerType: string;
+  providerAccountId: number;
+  providerResourceId: string;
+  regionName: string;
+  ipAddress: string;
+  syncStatus: string;
+  syncMessage: string;
+  lastAction: string;
+  lastSyncAt: string;
+  updatedAt: string;
+  resourceSnapshot: PortalServiceResourceSnapshot;
+}
+
+export interface PortalServiceChangeOrder {
+  id: number;
+  serviceId: number;
+  orderId: number;
+  orderNo: string;
+  invoiceId: number;
+  invoiceNo: string;
+  actionName: string;
+  title: string;
+  amount: number;
+  status: string;
+  executionStatus: string;
+  executionMessage: string;
+  reason: string;
+  billingCycle: string;
+  payload?: Record<string, unknown>;
+  paidAt: string;
+  refundedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PortalServiceDetailResponse {
+  service: PortalServiceDetailRecord;
+  order?: PortalOrder;
+  invoice?: PortalInvoice;
+  changeOrders: PortalServiceChangeOrder[];
 }
 
 export interface PortalOrder {
@@ -119,9 +182,115 @@ export interface PortalTicket {
   updatedAt: string;
 }
 
+export interface PortalTicketRecord {
+  id: number;
+  ticketNo: string;
+  customerId: number;
+  customerNo: string;
+  customerName: string;
+  serviceId: number;
+  serviceNo: string;
+  productName: string;
+  title: string;
+  content: string;
+  status: string;
+  priority: string;
+  source: string;
+  departmentName: string;
+  assignedAdminId: number;
+  assignedAdminName: string;
+  latestReplyExcerpt: string;
+  lastReplyAt: string;
+  closedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  slaStatus: string;
+  slaDeadlineAt: string;
+  slaRemainingMins: number;
+  slaPaused: boolean;
+  autoCloseAt: string;
+  autoCloseMins: number;
+}
+
+export interface PortalTicketReply {
+  id: number;
+  ticketId: number;
+  authorType: string;
+  authorId: number;
+  authorName: string;
+  content: string;
+  isInternal: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PortalTicketDetailResponse {
+  ticket: PortalTicketRecord;
+  replies: PortalTicketReply[];
+}
+
+export interface PortalTicketDepartment {
+  key: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  isDefault: boolean;
+  sort: number;
+}
+
+export interface CreatePortalTicketRequest {
+  serviceId?: number;
+  title: string;
+  content: string;
+  priority?: string;
+  departmentName?: string;
+}
+
+export interface ReplyPortalTicketRequest {
+  content: string;
+  status?: string;
+}
+
 export interface PortalWallet {
   balance: string;
   creditLimit: string;
+  creditUsed: string;
+  availableCredit: string;
+}
+
+export interface PortalWalletTransaction {
+  id: number;
+  transactionNo: string;
+  customerId: number;
+  customerNo: string;
+  customerName: string;
+  orderId: number;
+  orderNo: string;
+  invoiceId: number;
+  invoiceNo: string;
+  paymentId: number;
+  paymentNo: string;
+  refundId: number;
+  refundNo: string;
+  transactionType: string;
+  direction: string;
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  creditBefore: number;
+  creditAfter: number;
+  channel: string;
+  summary: string;
+  remark: string;
+  operatorType: string;
+  operatorId: number;
+  operatorName: string;
+  occurredAt: string;
+}
+
+export interface PortalWalletOverview {
+  wallet: PortalWallet;
+  transactions: PortalWalletTransaction[];
 }
 
 export interface PortalStat {
@@ -211,6 +380,10 @@ export function loadDashboard() {
   return unwrap(requestJson<ApiEnvelope<PortalDashboard>>("/dashboard"));
 }
 
+export function loadWallet() {
+  return unwrap(requestJson<ApiEnvelope<PortalWalletOverview>>("/wallet"));
+}
+
 export async function loadStoreProducts() {
   const result = await requestJson<ApiEnvelope<ListResponse<PortalProduct>>>("/products");
   return result.data.items;
@@ -219,6 +392,10 @@ export async function loadStoreProducts() {
 export async function loadServices() {
   const result = await requestJson<ApiEnvelope<ListResponse<PortalService>>>("/services");
   return result.data.items;
+}
+
+export function loadServiceDetail(id: number | string) {
+  return unwrap(requestJson<ApiEnvelope<PortalServiceDetailResponse>>(`/services/${id}`));
 }
 
 export async function loadOrders() {
@@ -232,8 +409,43 @@ export async function loadInvoices() {
 }
 
 export async function loadTickets() {
-  const result = await requestJson<ApiEnvelope<ListResponse<PortalTicket>>>("/tickets");
+  const result = await requestJson<ApiEnvelope<ListResponse<PortalTicketRecord>>>("/tickets");
   return result.data.items;
+}
+
+export async function loadTicketDepartments() {
+  const result = await requestJson<ApiEnvelope<ListResponse<PortalTicketDepartment>>>("/tickets/departments");
+  return result.data.items;
+}
+
+export function loadTicketDetail(ticketId: number | string) {
+  return unwrap(requestJson<ApiEnvelope<PortalTicketDetailResponse>>(`/tickets/${ticketId}`));
+}
+
+export function createTicket(payload: CreatePortalTicketRequest) {
+  return unwrap(
+    requestJson<ApiEnvelope<PortalTicketRecord>>("/tickets", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export function replyTicket(ticketId: number | string, payload: ReplyPortalTicketRequest) {
+  return unwrap(
+    requestJson<ApiEnvelope<PortalTicketDetailResponse>>(`/tickets/${ticketId}/replies`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export function closeTicket(ticketId: number | string) {
+  return unwrap(
+    requestJson<ApiEnvelope<PortalTicketRecord>>(`/tickets/${ticketId}/close`, {
+      method: "POST"
+    })
+  );
 }
 
 export function loadAccount() {
@@ -260,9 +472,9 @@ export function payInvoice(invoiceId: number) {
 export function formatCurrency(value: number | string) {
   const numeric = typeof value === "number" ? value : Number.parseFloat(String(value));
   if (Number.isNaN(numeric)) {
-    return "￥0.00";
+    return "¥0.00";
   }
-  return `￥${numeric.toFixed(2)}`;
+  return `¥${numeric.toFixed(2)}`;
 }
 
 export function formatProductType(type: string) {

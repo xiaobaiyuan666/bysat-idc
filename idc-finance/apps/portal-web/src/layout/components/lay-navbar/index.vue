@@ -11,7 +11,11 @@ const userStore = useUserStore();
 
 const title = computed(() => resolveMetaTitle(route.meta, localeStore.locale, "客户中心", "Client Area"));
 const subtitle = computed(() =>
-  pickLabel(localeStore.locale, "客户自助中心 · 订单 / 服务 / 账单 / 工单 / 钱包", "Self-service center · Orders / Services / Invoices / Tickets / Wallet")
+  pickLabel(
+    localeStore.locale,
+    "江苏白猿网络科技有限公司 · 猿创软件业务组 · 官网 www.bysat.com",
+    "Jiangsu Baiyuan Network Technology Co., Ltd. · Yuanchuang Software Business Group · www.bysat.com"
+  )
 );
 const logoutLabel = computed(() => pickLabel(localeStore.locale, "退出登录", "Sign out"));
 const languageLabel = computed(() => pickLabel(localeStore.locale, "语言", "Language"));

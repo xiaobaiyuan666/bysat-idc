@@ -10,9 +10,7 @@ const localeStore = useLocaleStore();
 const userStore = useUserStore();
 
 const breadcrumbTitles = computed(() =>
-  route.matched
-    .map(item => resolveMetaTitle(item.meta, localeStore.locale))
-    .filter(Boolean)
+  route.matched.map(item => resolveMetaTitle(item.meta, localeStore.locale)).filter(Boolean)
 );
 
 const currentTitle = computed(() => {
@@ -29,7 +27,11 @@ const displayName = computed(() => {
 const userInitial = computed(() => displayName.value.slice(0, 1).toUpperCase());
 const mysqlStatus = computed(() => pickLabel(localeStore.locale, "MySQL 在线", "MySQL Online"));
 const productSubtitle = computed(() =>
-  pickLabel(localeStore.locale, "公有云业务与财务运营中心", "Public cloud operations and finance control center")
+  pickLabel(
+    localeStore.locale,
+    "江苏白猿网络科技有限公司 · 猿创软件业务组",
+    "Jiangsu Baiyuan Network Technology Co., Ltd. · Yuanchuang Software Business Group"
+  )
 );
 const roleLabel = computed(() => pickLabel(localeStore.locale, "系统管理员", "System Admin"));
 const logoutLabel = computed(() => pickLabel(localeStore.locale, "退出登录", "Sign out"));

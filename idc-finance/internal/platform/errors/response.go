@@ -15,3 +15,12 @@ func Ok[T any](data T, requestID string) APIResponse[T] {
 		Data:      data,
 	}
 }
+
+func BadRequest(message, requestID string) APIResponse[any] {
+	return APIResponse[any]{
+		Code:      "BAD_REQUEST",
+		Message:   message,
+		RequestID: requestID,
+		Data:      nil,
+	}
+}

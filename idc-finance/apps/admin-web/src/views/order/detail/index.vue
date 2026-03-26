@@ -16,15 +16,20 @@ import {
 } from "@/api/admin";
 import {
   billingCycleOptions as createBillingCycleOptions,
+  formatAuditAction,
+  formatAuditDescription,
+  formatAuditReason,
   formatBillingCycle,
   formatChangeOrderAction,
   formatChangeOrderExecution,
+  formatFieldValue,
   formatInvoiceStatus,
   formatMoney,
   formatOrderStatus,
   formatProductType,
   formatProviderType,
   formatServiceStatus,
+  fieldLabel,
   orderStatusOptions as createOrderStatusOptions
 } from "@/utils/business";
 
@@ -51,7 +56,9 @@ const _legacyOrderStatusOptions = [
 
 const loading = ref(false);
 const savingEdit = ref(false);
+const savingLifecycle = ref(false);
 const editDialogVisible = ref(false);
+const lifecycleDialogVisible = ref(false);
 const detail = ref<OrderDetailResponse | null>(null);
 const providerAccounts = ref<ProviderAccount[]>([]);
 const editForm = reactive({
@@ -62,8 +69,13 @@ const editForm = reactive({
   status: "PENDING",
   reason: ""
 });
+const lifecycleForm = reactive({
+  status: "ACTIVE",
+  reason: ""
+});
 
 const customerId = computed(() => detail.value?.order.customerId ?? 0);
+const primaryInvoice = computed(() => detail.value?.invoices[0] ?? null);
 const orderAccount = computed(() => {
   const accountId = detail.value?.order.providerAccountId || detail.value?.services[0]?.providerAccountId || 0;
   if (!accountId) return null;
@@ -97,6 +109,18 @@ const orderEditImpact = computed(() => {
       };
   }
 });
+const lifecycleActionOptions = computed(() =>
+  ["PENDING", "ACTIVE", "COMPLETED", "CANCELLED"]
+    .filter(status => status !== (detail.value?.order.status || ""))
+    .map(status => ({
+      value: status,
+      label: formatStatus(status)
+    }))
+);
+const lifecycleNotice = computed(() => {
+  const payStatus = primaryInvoice.value ? formatInvoiceStatus(localeStore.locale, primaryInvoice.value.status) : "无账单";
+  return `当前订单状态 ${formatStatus(detail.value?.order.status || "PENDING")}，主账单 ${payStatus}，关联服务 ${detail.value?.services.length ?? 0} 个。`;
+});
 
 const contextTabs = computed(() => [
   { key: "customer", label: "客户", to: customerId.value ? `/customer/detail/${customerId.value}` : undefined },
@@ -115,9 +139,52 @@ const contextTabs = computed(() => [
   }
 ]);
 
+interface OrderTimelineItem {
+  key: string;
+  time: string;
+  title: string;
+  description: string;
+  amount?: number;
+  tag?: string;
+  tagType?: "primary" | "success" | "warning" | "info" | "danger";
+  routePath?: string;
+  routeQuery?: Record<string, string | undefined>;
+  linkLabel?: string;
+}
+
+interface OrderAuditChangeRow {
+  key: string;
+  label: string;
+  before: string;
+  after: string;
+}
+
+interface OrderAuditRow {
+  id: number;
+  createdAt: string;
+  actor: string;
+  action: string;
+  actionLabel: string;
+  description: string;
+  reason: string;
+  changes: OrderAuditChangeRow[];
+}
+
 function formatCurrency(value: number) {
   return formatMoney(localeStore.locale, value);
   return `¥${value.toFixed(2)}`;
+}
+
+function formatTimelineAmount(value: number) {
+  if (value < 0) return `-${formatCurrency(Math.abs(value))}`;
+  return formatCurrency(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
 }
 
 function formatCycle(cycle: string) {
@@ -259,6 +326,291 @@ async function submitEditOrder() {
   }
 }
 
+function defaultLifecycleReason(status: string) {
+  const mapping: Record<string, string> = {
+    PENDING: "后台回退为待支付，等待重新收款或人工复核",
+    ACTIVE: "后台确认订单进入待开通流程",
+    COMPLETED: "后台确认订单已完成交付",
+    CANCELLED: "后台关闭订单并终止后续交付"
+  };
+  return mapping[status] ?? "后台调整订单生命周期状态";
+}
+
+function openLifecycleDialog(status: string) {
+  lifecycleForm.status = status;
+  lifecycleForm.reason = defaultLifecycleReason(status);
+  lifecycleDialogVisible.value = true;
+}
+
+function closeLifecycleDialog() {
+  lifecycleDialogVisible.value = false;
+  lifecycleForm.reason = "";
+}
+
+async function submitLifecycleAction() {
+  if (!detail.value) return;
+  savingLifecycle.value = true;
+  try {
+    const result = await updatePendingOrder(detail.value.order.id, {
+      status: lifecycleForm.status,
+      reason: lifecycleForm.reason.trim() || defaultLifecycleReason(lifecycleForm.status)
+    });
+    detail.value = result;
+    lifecycleDialogVisible.value = false;
+    ElMessage.success(`订单已更新为${formatStatus(lifecycleForm.status)}`);
+  } finally {
+    savingLifecycle.value = false;
+  }
+}
+
+function parseTimelineTime(value: string) {
+  if (!value) return 0;
+  const parsed = Date.parse(value.includes("T") ? value : value.replace(" ", "T"));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function providerAccountLabel(accountId?: number) {
+  if (!accountId) return "未绑定";
+  const account = providerAccounts.value.find(item => item.id === accountId);
+  if (!account) return "未绑定";
+  return `${account.name} / ${account.baseUrl}`;
+}
+
+function openCustomerWorkbench() {
+  if (!detail.value) return;
+  void router.push(`/customer/detail/${detail.value.order.customerId}`);
+}
+
+function openProductWorkbench() {
+  if (!detail.value) return;
+  void router.push(`/catalog/products/${detail.value.order.productId}`);
+}
+
+function openProviderAccountWorkbench() {
+  if (!detail.value) return;
+  const providerType = detail.value.services[0]?.providerType || detail.value.order.automationType;
+  const accountId = detail.value.services[0]?.providerAccountId || detail.value.order.providerAccountId;
+  void router.push({
+    path: "/providers/accounts",
+    query: {
+      providerType: providerType || undefined,
+      accountId: accountId ? String(accountId) : undefined
+    }
+  });
+}
+
+function openInvoiceWorkbench(invoiceId?: number) {
+  const id = invoiceId || detail.value?.invoices[0]?.id;
+  if (!id) return;
+  void router.push(`/billing/invoices/${id}`);
+}
+
+function openServiceWorkbench(serviceId?: number) {
+  const id = serviceId || detail.value?.services[0]?.id;
+  if (!id) return;
+  void router.push(`/services/detail/${id}`);
+}
+
+function openProviderAutomationContext(options?: {
+  invoiceId?: number;
+  serviceId?: number;
+  channel?: string;
+}) {
+  if (!detail.value) return;
+  const matchedService = options?.serviceId
+    ? detail.value.services.find(item => item.id === options.serviceId)
+    : detail.value.services[0];
+  void router.push({
+    path: "/providers/automation",
+    query: {
+      orderId: String(detail.value.order.id),
+      invoiceId: options?.invoiceId ? String(options.invoiceId) : undefined,
+      serviceId: options?.serviceId ? String(options.serviceId) : undefined,
+      channel: options?.channel || matchedService?.providerType || detail.value.order.automationType || undefined
+    }
+  });
+}
+
+function openProviderAutomationWorkbench() {
+  openProviderAutomationContext();
+}
+
+function openProviderResourcesContext(options?: {
+  serviceId?: number;
+  channel?: string;
+  accountId?: number;
+}) {
+  if (!detail.value) return;
+  const matchedService = options?.serviceId
+    ? detail.value.services.find(item => item.id === options.serviceId)
+    : detail.value.services[0];
+  void router.push({
+    path: "/providers/resources",
+    query: {
+      providerType: options?.channel || matchedService?.providerType || detail.value.order.automationType || undefined,
+      accountId: options?.accountId
+        ? String(options.accountId)
+        : matchedService?.providerAccountId
+          ? String(matchedService.providerAccountId)
+          : undefined,
+      serviceId: options?.serviceId ? String(options.serviceId) : matchedService?.id ? String(matchedService.id) : undefined
+    }
+  });
+}
+
+function openProviderResourcesWorkbench() {
+  openProviderResourcesContext();
+}
+
+function openOrderTimelineTarget(item: OrderTimelineItem) {
+  if (!item.routePath) return;
+  void router.push({
+    path: item.routePath,
+    query: item.routeQuery
+  });
+}
+
+const orderTimeline = computed<OrderTimelineItem[]>(() => {
+  if (!detail.value) return [];
+
+  const items: OrderTimelineItem[] = [
+    {
+      key: `order-${detail.value.order.id}`,
+      time: detail.value.order.createdAt,
+      title: `订单创建 ${detail.value.order.orderNo}`,
+      description: `商品 ${detail.value.order.productName}，状态 ${formatStatus(detail.value.order.status)}，自动化渠道 ${formatAutomationType(detail.value.order.automationType)}`,
+      amount: detail.value.order.amount,
+      tag: detail.value.order.orderNo,
+      tagType: statusTagType(detail.value.order.status) as OrderTimelineItem["tagType"],
+      routePath: `/customer/detail/${detail.value.order.customerId}`,
+      linkLabel: "打开客户工作台"
+    }
+  ];
+
+  detail.value.invoices.forEach(invoice => {
+    items.push({
+      key: `invoice-${invoice.id}`,
+      time: invoice.paidAt || invoice.dueAt,
+      title: `账单联动 ${invoice.invoiceNo}`,
+      description: `账单状态 ${formatInvoiceStatus(localeStore.locale, invoice.status)}，金额 ${formatCurrency(invoice.totalAmount)}，到期 ${invoice.dueAt || "-"}`,
+      amount: invoice.totalAmount,
+      tag: formatInvoiceStatus(localeStore.locale, invoice.status),
+      tagType: invoice.status === "PAID" ? "success" : invoice.status === "UNPAID" ? "warning" : "info",
+      routePath: `/billing/invoices/${invoice.id}`,
+      linkLabel: "打开账单工作台"
+    });
+  });
+
+  detail.value.services.forEach(service => {
+    items.push({
+      key: `service-${service.id}`,
+      time: service.updatedAt || service.lastSyncAt || service.createdAt,
+      title: `服务交付 ${service.serviceNo}`,
+      description: `当前状态 ${formatServiceStatus(localeStore.locale, service.status)}，接口账户 ${providerAccountLabel(service.providerAccountId)}，下次到期 ${service.nextDueAt || "-"}`,
+      tag: formatAutomationType(service.providerType),
+      tagType: "primary",
+      routePath: `/services/detail/${service.id}`,
+      linkLabel: "打开服务工作台"
+    });
+  });
+
+  if (detail.value.changeOrder) {
+    items.push({
+      key: `change-order-${detail.value.changeOrder.id}`,
+      time: detail.value.changeOrder.paidAt || detail.value.changeOrder.createdAt,
+      title: `改配执行 ${detail.value.changeOrder.invoiceNo}`,
+      description: `动作 ${changeOrderActionLabel(detail.value.changeOrder.actionName)}，支付状态 ${formatInvoiceStatus(localeStore.locale, detail.value.changeOrder.status)}，执行状态 ${changeOrderExecutionLabel(detail.value.changeOrder.executionStatus)}`,
+      amount: detail.value.changeOrder.amount,
+      tag: detail.value.changeOrder.executionStatus,
+      tagType: changeOrderExecutionType(detail.value.changeOrder.executionStatus) as OrderTimelineItem["tagType"],
+      routePath: "/providers/automation",
+      routeQuery: {
+        orderId: String(detail.value.order.id),
+        invoiceId: detail.value.changeOrder.invoiceId ? String(detail.value.changeOrder.invoiceId) : undefined,
+        serviceId: detail.value.changeOrder.serviceId ? String(detail.value.changeOrder.serviceId) : undefined,
+        channel: detail.value.services[0]?.providerType || detail.value.order.automationType || undefined
+      },
+      linkLabel: "查看改配执行任务"
+    });
+  }
+
+  detail.value.auditLogs.slice(0, 6).forEach(log => {
+    items.push({
+      key: `audit-${log.id}`,
+      time: log.createdAt,
+      title: `审计记录 ${formatAuditAction(localeStore.locale, log.action)}`,
+      description: `${formatAuditDescription(localeStore.locale, log.action, log.description)}｜操作人 ${log.actor || "-"}${log.target ? `｜对象 ${log.target}` : ""}`,
+      tag: log.actor || "系统",
+      tagType: "info"
+    });
+  });
+
+  return items.sort((left, right) => parseTimelineTime(right.time) - parseTimelineTime(left.time));
+});
+
+function buildAuditChanges(item: OrderDetailResponse["auditLogs"][number]): OrderAuditChangeRow[] {
+  const payload = asRecord(item.payload);
+  const before = asRecord(payload.before);
+  const after = asRecord(payload.after);
+  const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
+  return keys
+    .filter(
+      key =>
+        formatFieldValue(localeStore.locale, key, before[key], item.action) !==
+        formatFieldValue(localeStore.locale, key, after[key], item.action)
+    )
+    .map(key => ({
+      key,
+      label: fieldLabel(localeStore.locale, key),
+      before: formatFieldValue(localeStore.locale, key, before[key], item.action),
+      after: formatFieldValue(localeStore.locale, key, after[key], item.action)
+    }));
+}
+
+const orderAuditRows = computed<OrderAuditRow[]>(() =>
+  (detail.value?.auditLogs ?? []).map(item => ({
+    id: item.id,
+    createdAt: item.createdAt,
+    actor: item.actor || "系统",
+    action: item.action,
+    actionLabel: formatAuditAction(localeStore.locale, item.action),
+    description: formatAuditDescription(localeStore.locale, item.action, item.description),
+    reason: formatAuditReason(asRecord(item.payload).reason),
+    changes: buildAuditChanges(item)
+  }))
+);
+
+const priceRelatedKeys = new Set(["amount", "billingCycle", "productName", "dueAt"]);
+const lifecycleRelatedKeys = new Set(["status"]);
+
+const pricingAuditRows = computed(() =>
+  orderAuditRows.value.filter(row => row.changes.some(change => priceRelatedKeys.has(change.key)))
+);
+
+const lifecycleAuditRows = computed(() =>
+  orderAuditRows.value.filter(
+    row =>
+      row.action === "order.checkout" ||
+      row.changes.some(change => lifecycleRelatedKeys.has(change.key))
+  )
+);
+
+const auditSummary = computed(() => ({
+  total: orderAuditRows.value.length,
+  manualAdjustments: orderAuditRows.value.filter(row => row.action === "order.manual_adjust").length,
+  priceAdjustments: pricingAuditRows.value.length,
+  lifecycleChanges: lifecycleAuditRows.value.length,
+  latestOperator: orderAuditRows.value[0]?.actor || "系统"
+}));
+
+function summarizeAuditChanges(row: OrderAuditRow) {
+  if (row.changes.length === 0) return "-";
+  return row.changes
+    .slice(0, 3)
+    .map(change => `${change.label} ${change.before} -> ${change.after}`)
+    .join("；");
+}
+
 watch(() => route.params.id, () => void loadDetail());
 
 onMounted(async () => {
@@ -356,8 +708,77 @@ onMounted(async () => {
                   :closable="false"
                   show-icon
                 />
+                <div class="inline-actions" style="margin-top: 16px">
+                  <el-button plain @click="openCustomerWorkbench">客户</el-button>
+                  <el-button plain @click="openProductWorkbench">商品</el-button>
+                  <el-button plain @click="openProviderAccountWorkbench">接口账户</el-button>
+                  <el-button plain @click="openProviderAutomationWorkbench">自动化任务</el-button>
+                  <el-button plain :disabled="detail.services.length === 0" @click="openProviderResourcesWorkbench">渠道资源</el-button>
+                </div>
+                <div style="margin-top: 20px">
+                  <div class="section-card__head">
+                    <strong>生命周期处置</strong>
+                    <span class="section-card__meta">当前状态 {{ formatStatus(detail.order.status) }}</span>
+                  </div>
+                  <el-alert
+                    :title="lifecycleNotice"
+                    description="常用处置包括回退待支付、转待开通、确认完成和订单取消，动作会写入审计并回写关联账单/服务状态。"
+                    type="warning"
+                    :closable="false"
+                    show-icon
+                  />
+                  <div class="inline-actions" style="margin-top: 16px">
+                    <el-button
+                      v-for="item in lifecycleActionOptions"
+                      :key="item.value"
+                      plain
+                      @click="openLifecycleDialog(item.value)"
+                    >
+                      {{ item.label }}
+                    </el-button>
+                  </div>
+                </div>
               </div>
             </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="业务时间线">
+            <div class="table-toolbar">
+              <div class="table-toolbar__meta">
+                <strong>订单业务时间线</strong>
+                <span>共 {{ orderTimeline.length }} 条对象事件</span>
+              </div>
+              <div class="inline-actions">
+                <el-button type="primary" link @click="openProviderAutomationWorkbench">任务中心</el-button>
+                <el-button type="primary" link @click="openProviderResourcesWorkbench">渠道资源</el-button>
+              </div>
+            </div>
+            <el-timeline v-if="orderTimeline.length">
+              <el-timeline-item
+                v-for="item in orderTimeline"
+                :key="item.key"
+                :timestamp="item.time || '未记录时间'"
+                placement="top"
+                :type="item.tagType || 'info'"
+              >
+                <div class="panel-card">
+                  <div class="section-card__head">
+                    <strong>{{ item.title }}</strong>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+                      <el-tag v-if="item.tag" :type="item.tagType || 'info'" effect="light">{{ item.tag }}</el-tag>
+                      <strong v-if="item.amount !== undefined">{{ formatTimelineAmount(item.amount) }}</strong>
+                    </div>
+                  </div>
+                  <div style="color: var(--el-text-color-regular); line-height: 1.7">
+                    {{ item.description }}
+                  </div>
+                  <div v-if="item.linkLabel" class="inline-actions" style="margin-top: 12px">
+                    <el-button type="primary" link @click="openOrderTimelineTarget(item)">{{ item.linkLabel }}</el-button>
+                  </div>
+                </div>
+              </el-timeline-item>
+            </el-timeline>
+            <el-empty v-else description="当前订单暂无可展示的业务时间线" :image-size="80" />
           </el-tab-pane>
 
           <el-tab-pane label="关联账单">
@@ -370,9 +791,12 @@ onMounted(async () => {
                 <template #default="{ row }">{{ formatInvoiceStatus(localeStore.locale, row.status) }}</template>
               </el-table-column>
               <el-table-column prop="dueAt" label="到期时间" min-width="180" />
-              <el-table-column label="操作" min-width="140" fixed="right">
+              <el-table-column label="操作" min-width="220" fixed="right">
                 <template #default="{ row }">
-                  <el-button type="primary" link @click="router.push(`/billing/invoices/${row.id}`)">打开账单</el-button>
+                  <div class="inline-actions">
+                    <el-button type="primary" link @click="openInvoiceWorkbench(row.id)">打开账单</el-button>
+                    <el-button type="primary" link @click="openProviderAutomationContext({ invoiceId: row.id })">任务中心</el-button>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -386,22 +810,26 @@ onMounted(async () => {
                 <template #default="{ row }">{{ formatAutomationType(row.providerType) }}</template>
               </el-table-column>
               <el-table-column label="接口账户" min-width="220">
-                <template #default="{ row }">
-                  {{
-                    providerAccounts.find(item => item.id === row.providerAccountId)
-                      ? `${providerAccounts.find(item => item.id === row.providerAccountId)?.name} / ${providerAccounts.find(item => item.id === row.providerAccountId)?.baseUrl}`
-                      : "未绑定"
-                  }}
-                </template>
+                <template #default="{ row }">{{ providerAccountLabel(row.providerAccountId) }}</template>
               </el-table-column>
               <el-table-column label="状态" min-width="120">
                 <template #default="{ row }">{{ formatServiceStatus(localeStore.locale, row.status) }}</template>
               </el-table-column>
               <el-table-column prop="createdAt" label="开通时间" min-width="180" />
               <el-table-column prop="nextDueAt" label="下次到期" min-width="160" />
-              <el-table-column label="操作" min-width="140" fixed="right">
+              <el-table-column label="操作" min-width="260" fixed="right">
                 <template #default="{ row }">
-                  <el-button type="primary" link @click="router.push(`/services/detail/${row.id}`)">打开服务</el-button>
+                  <div class="inline-actions">
+                    <el-button type="primary" link @click="openServiceWorkbench(row.id)">打开服务</el-button>
+                    <el-button type="primary" link @click="openProviderAutomationContext({ serviceId: row.id, channel: row.providerType })">任务中心</el-button>
+                    <el-button
+                      type="primary"
+                      link
+                      @click="openProviderResourcesContext({ serviceId: row.id, channel: row.providerType, accountId: row.providerAccountId })"
+                    >
+                      渠道资源
+                    </el-button>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -427,10 +855,85 @@ onMounted(async () => {
                 {{ detail.changeOrder.executionMessage || "-" }}
               </el-descriptions-item>
             </el-descriptions>
+            <div class="inline-actions" style="margin-top: 16px">
+              <el-button type="primary" link @click="router.push(`/orders/change-orders?orderId=${detail.changeOrder.orderId}`)">改配单工作台</el-button>
+              <el-button type="primary" link @click="openInvoiceWorkbench(detail.changeOrder.invoiceId)">打开改配账单</el-button>
+              <el-button type="primary" link @click="openServiceWorkbench(detail.changeOrder.serviceId)">打开关联服务</el-button>
+              <el-button
+                type="primary"
+                link
+                @click="openProviderAutomationContext({ serviceId: detail.changeOrder.serviceId, invoiceId: detail.changeOrder.invoiceId })"
+              >
+                查看执行任务
+              </el-button>
+              <el-button type="primary" link @click="openProviderResourcesContext({ serviceId: detail.changeOrder.serviceId })">
+                渠道资源
+              </el-button>
+            </div>
           </el-tab-pane>
 
           <el-tab-pane label="自动化任务">
             <AutomationTaskPanel title="订单自动化任务" :order-id="detail.order.id" />
+          </el-tab-pane>
+
+          <el-tab-pane label="处置记录">
+            <div class="summary-strip" style="margin-bottom: 16px">
+              <div class="summary-pill">
+                <span>审计总数</span>
+                <strong>{{ auditSummary.total }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>人工调整</span>
+                <strong>{{ auditSummary.manualAdjustments }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>改价记录</span>
+                <strong>{{ auditSummary.priceAdjustments }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>状态变更</span>
+                <strong>{{ auditSummary.lifecycleChanges }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>最近操作人</span>
+                <strong>{{ auditSummary.latestOperator }}</strong>
+              </div>
+            </div>
+
+            <div class="portal-grid portal-grid--two">
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>价格与配置变更</strong>
+                  <span class="section-card__meta">记录金额、周期、商品名、到期时间的调整</span>
+                </div>
+                <el-table :data="pricingAuditRows" border stripe empty-text="暂无价格或配置调整记录">
+                  <el-table-column prop="createdAt" label="时间" min-width="170" />
+                  <el-table-column prop="actor" label="操作人" min-width="120" />
+                  <el-table-column prop="actionLabel" label="动作" min-width="160" />
+                  <el-table-column label="变更摘要" min-width="320" show-overflow-tooltip>
+                    <template #default="{ row }">{{ summarizeAuditChanges(row) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
+                </el-table>
+              </div>
+
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>生命周期记录</strong>
+                  <span class="section-card__meta">记录订单状态流转和下单动作</span>
+                </div>
+                <el-table :data="lifecycleAuditRows" border stripe empty-text="暂无生命周期处置记录">
+                  <el-table-column prop="createdAt" label="时间" min-width="170" />
+                  <el-table-column prop="actor" label="操作人" min-width="120" />
+                  <el-table-column prop="actionLabel" label="动作" min-width="160" />
+                  <el-table-column prop="description" label="说明" min-width="240" show-overflow-tooltip />
+                  <el-table-column label="状态摘要" min-width="320" show-overflow-tooltip>
+                    <template #default="{ row }">{{ summarizeAuditChanges(row) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
+                </el-table>
+              </div>
+            </div>
           </el-tab-pane>
 
           <el-tab-pane label="审计日志">
@@ -439,6 +942,36 @@ onMounted(async () => {
         </el-tabs>
       </template>
     </PageWorkbench>
+
+    <el-dialog v-model="lifecycleDialogVisible" title="生命周期处置" width="520px" @closed="closeLifecycleDialog">
+      <el-form label-position="top">
+        <el-alert
+          :title="`将订单更新为${formatStatus(lifecycleForm.status)}`"
+          description="这个动作会走后台人工调整链路，并同步把变更写入审计日志。若订单已经关联服务，服务交付状态也会一并回写。"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+        <el-form-item label="目标状态">
+          <el-select v-model="lifecycleForm.status" style="width: 100%">
+            <el-option v-for="item in orderStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="变更原因">
+          <el-input
+            v-model="lifecycleForm.reason"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入后台处置原因，例如人工收款后转待开通、客户取消订单、人工确认已交付等"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeLifecycleDialog">取消</el-button>
+        <el-button type="primary" :loading="savingLifecycle" @click="submitLifecycleAction">确认处置</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="editDialogVisible" title="人工调整订单" width="560px">
       <el-form label-position="top">

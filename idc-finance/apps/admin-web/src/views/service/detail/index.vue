@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -9,20 +9,16 @@ import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import { useLocaleStore } from "@/store";
 import {
   createServiceChangeOrder,
-  fetchMofangInstanceDetail,
   fetchMofangServiceResources,
   fetchMofangSyncLogs,
   fetchProviderAccounts,
   fetchServiceDetail,
   runMofangServiceResourceAction,
-  runMofangInstanceAction,
   runServiceAction,
   syncMofangService,
   updateServiceRecord,
   type MofangBackup,
   type MofangDisk,
-  type MofangInstanceActionResponse,
-  type MofangInstanceDetail,
   type MofangServiceResourcesResponse,
   type MofangSnapshot,
   type MofangSyncLogItem,
@@ -45,7 +41,6 @@ import {
   serviceStatusOptions as createServiceStatusOptions,
   syncStatusOptions as createSyncStatusOptions
 } from "@/utils/business";
-import { buildVncPageUrl } from "@/utils/vnc";
 
 type ResourceDialogAction =
   | "add-ipv4"
@@ -55,22 +50,6 @@ type ResourceDialogAction =
   | "create-snapshot"
   | "create-backup"
   | "";
-
-type RemoteInstanceAction =
-  | "suspend"
-  | "power-on"
-  | "power-off"
-  | "reboot"
-  | "hard-power-off"
-  | "hard-reboot"
-  | "reset-password"
-  | "reinstall"
-  | "unsuspend"
-  | "get-vnc"
-  | "rescue-start"
-  | "rescue-stop"
-  | "lock"
-  | "unlock";
 
 const route = useRoute();
 const router = useRouter();
@@ -83,12 +62,8 @@ const resourceLoading = ref("");
 const changeOrderLoading = ref(false);
 const detail = ref<ServiceDetailResponse | null>(null);
 const resources = ref<MofangServiceResourcesResponse | null>(null);
-const instanceDetail = ref<MofangInstanceDetail | null>(null);
 const providerAccounts = ref<ProviderAccount[]>([]);
 const syncLogs = ref<MofangSyncLogItem[]>([]);
-const remoteActionLoading = ref("");
-const consoleVisible = ref(false);
-const consolePayload = ref<Record<string, unknown> | null>(null);
 
 const editVisible = ref(false);
 const resetVisible = ref(false);
@@ -140,80 +115,12 @@ const _legacySyncStatusOptions = [
 ];
 
 const isMofangService = computed(() => detail.value?.service.providerType === "MOFANG_CLOUD");
-const isRemoteManagedService = computed(() => isMofangService.value && Boolean(detail.value?.service.providerResourceId));
 const customerId = computed(() => detail.value?.service.customerId ?? 0);
 const serviceAccount = computed(() => {
   const accountId = detail.value?.service.providerAccountId || 0;
   if (!accountId) return null;
   return providerAccounts.value.find(item => item.id === accountId) ?? null;
 });
-const remoteRaw = computed(() => toRecord(instanceDetail.value?.raw));
-const remoteUser = computed(() => toRecord(remoteRaw.value.user));
-const remotePowerState = computed(() => {
-  const rawStatus = String(pickString(remoteRaw.value, "status") || instanceDetail.value?.status || "").toLowerCase();
-  if (["active", "on", "running"].includes(rawStatus)) return "on";
-  if (["suspended", "suspend"].includes(rawStatus)) return "suspend";
-  if (["off", "shutdown", "stopped"].includes(rawStatus)) return "off";
-  return rawStatus || "unknown";
-});
-const remoteConsoleEnabled = computed(() => pickBoolean(remoteRaw.value, "vnc") !== false);
-const remoteLocked = computed(() => pickBoolean(remoteRaw.value, "lock") === true);
-const remoteInRescue = computed(() => pickBoolean(remoteRaw.value, "rescue") === true);
-const remoteActionDisabled = computed(() => {
-  const state = remotePowerState.value;
-  const suspended = state === "suspend";
-  const running = state === "on";
-  const poweredOff = state === "off";
-
-  return {
-    getVnc: !remoteConsoleEnabled.value,
-    powerOn: running || suspended,
-    powerOff: !running,
-    reboot: !running,
-    hardPowerOff: !running,
-    hardReboot: !running,
-    suspend: suspended,
-    unsuspend: !suspended,
-    rescueStart: suspended || remoteInRescue.value,
-    rescueStop: suspended || !remoteInRescue.value,
-    lock: remoteLocked.value,
-    unlock: !remoteLocked.value,
-    resetPassword: suspended || poweredOff,
-    reinstall: suspended
-  };
-});
-const remoteConsoleSummary = computed(() => {
-  if (!consolePayload.value) return [];
-  return [
-    {
-      label: "控制台地址",
-      value: renderValue(
-        pickString(consolePayload.value, "vnc_url_https") ||
-          pickString(consolePayload.value, "vnc_url") ||
-          pickString(consolePayload.value, "vnc_url_http")
-      )
-    },
-    { label: "实例地址", value: renderValue(pickString(consolePayload.value, "ip")) },
-    { label: "控制台口令", value: renderValue(pickString(consolePayload.value, "password")) },
-    { label: "VNC 密码", value: renderValue(pickString(consolePayload.value, "vnc_pass")) },
-    { label: "连接令牌", value: renderValue(pickString(consolePayload.value, "token")) },
-    { label: "路径编号", value: renderValue(pickNumber(consolePayload.value, "path")) }
-  ];
-});
-const consoleLaunchUrl = computed(() =>
-  buildVncPageUrl(consolePayload.value, {
-    ip: pickString(consolePayload.value ?? {}, "ip") || detail.value?.service.ipAddress,
-    title:
-      instanceDetail.value?.name ||
-      pickString(consolePayload.value ?? {}, "hostname") ||
-      detail.value?.service.serviceNo
-  })
-);
-
-function openConsoleWindow(url: string) {
-  const opened = window.open(url, "_blank", "noopener,noreferrer");
-  return Boolean(opened);
-}
 const serviceEditImpact = computed(() => {
   switch (editForm.status) {
     case "ACTIVE":
@@ -472,6 +379,69 @@ const resourceBillingImpact = computed(() => {
   };
 });
 
+const changeOrderSummary = computed(() => {
+  const items = detail.value?.changeOrders ?? [];
+  return {
+    total: items.length,
+    unpaid: items.filter(item => item.status === "UNPAID").length,
+    paid: items.filter(item => item.status === "PAID").length,
+    refunded: items.filter(item => item.status === "REFUNDED").length,
+    waitingExecution: items.filter(item => item.executionStatus === "WAITING_PAYMENT" || item.executionStatus === "PENDING").length,
+    failedExecution: items.filter(item => item.executionStatus === "FAILED").length
+  };
+});
+
+const channelStrategyGuide = computed(() => {
+  if (isMofangService.value) {
+    return {
+      type: "success" as const,
+      title: "当前服务已接入云资源渠道",
+      description:
+        "适合直接处理实例生命周期、密码重置、重装系统、磁盘/IP 改配与资源同步。资源动作会联动自动化任务和同步日志。"
+    };
+  }
+  switch (detail.value?.service.providerType) {
+    case "ZJMF_API":
+      return {
+        type: "warning" as const,
+        title: "当前服务走上游财务渠道",
+        description:
+          "重点是核对上游商品、账单、服务编号和同步状态。后台动作以订单、账单、工单和自动化协同为主，不建议误用云资源动作。"
+      };
+    case "RESOURCE":
+      return {
+        type: "info" as const,
+        title: "当前服务走资源池交付",
+        description:
+          "适合从库存或资源池分配现成资源。后台要优先核对库存编号、到期时间、交付记录和人工处理说明。"
+      };
+    case "MANUAL":
+      return {
+        type: "info" as const,
+        title: "当前服务走手工交付",
+        description:
+          "适合代维或人工处理类业务。建议通过工单、审计、改配单和账单工作台收口，不依赖远端资源动作。"
+      };
+    default:
+      return {
+        type: "info" as const,
+        title: "当前服务走本地模块",
+        description:
+          "适合完全由本地系统维护的服务对象。重点关注本地状态、续费、改配、审计和工单协同。"
+      };
+  }
+});
+
+const channelCapabilitySummary = computed(() => ({
+  canLifecycle: Boolean(detail.value),
+  canReboot: isMofangService.value,
+  canCredential: isMofangService.value,
+  canSync: isMofangService.value,
+  canResourceAction: isMofangService.value && Boolean(resources.value),
+  canOpenChangeOrders: (detail.value?.changeOrders?.length ?? 0) > 0,
+  providerLabel: providerTypeLabel(detail.value?.service.providerType || "LOCAL")
+}));
+
 const contextTabs = computed(() => [
   { key: "customer", label: "客户", to: customerId.value ? `/customer/detail/${customerId.value}` : undefined },
   { key: "service", label: "服务工作台", active: true, badge: detail.value?.service.serviceNo },
@@ -489,55 +459,12 @@ const contextTabs = computed(() => [
   }
 ]);
 
-function toRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function pickString(source: Record<string, unknown>, key: string) {
-  const value = source[key];
-  return typeof value === "string" ? value : "";
-}
-
-function pickNumber(source: Record<string, unknown>, key: string) {
-  const value = source[key];
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
-}
-
-function pickBoolean(source: Record<string, unknown>, key: string) {
-  const value = source[key];
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value > 0;
-  if (typeof value === "string") {
-    if (["1", "true", "yes", "on"].includes(value.toLowerCase())) return true;
-    if (["0", "false", "no", "off"].includes(value.toLowerCase())) return false;
-  }
-  return undefined;
-}
-
 function renderValue(value?: string | number | null) {
   return value === undefined || value === null || value === "" ? "-" : String(value);
 }
 
 function formatBoolean(value: boolean) {
   return value ? "是" : "否";
-}
-
-function formatOptionalBoolean(value?: boolean) {
-  return value === undefined ? "-" : value ? "是" : "否";
-}
-
-function formatBandwidth(inbound?: number, outbound?: number) {
-  if (inbound === undefined && outbound === undefined) return "-";
-  return `${renderValue(inbound)} / ${renderValue(outbound)} Mbps`;
-}
-
-function formatTrafficQuota(quota?: number) {
-  return quota === undefined ? "-" : `${quota} GB`;
 }
 
 function serviceStatusLabel(status: string) {
@@ -561,32 +488,6 @@ function serviceStatusType(status: string) {
     PROVISIONING: "primary",
     TERMINATED: "danger",
     FAILED: "danger"
-  };
-  return mapping[status] ?? "info";
-}
-
-function remoteStatusLabel(status: string) {
-  const mapping: Record<string, string> = {
-    on: "运行中",
-    off: "已关机",
-    suspend: "已暂停",
-    unknown: "未知",
-    ACTIVE: "运行中",
-    SUSPENDED: "已暂停",
-    UNKNOWN: "未知"
-  };
-  return mapping[status] ?? status ?? "-";
-}
-
-function remoteStatusType(status: string) {
-  const mapping: Record<string, string> = {
-    on: "success",
-    off: "info",
-    suspend: "warning",
-    unknown: "danger",
-    ACTIVE: "success",
-    SUSPENDED: "warning",
-    UNKNOWN: "danger"
   };
   return mapping[status] ?? "info";
 }
@@ -672,25 +573,14 @@ async function loadDetail() {
   try {
     detail.value = await fetchServiceDetail(route.params.id as string);
     resources.value = null;
-    instanceDetail.value = null;
     syncLogs.value = [];
-    consolePayload.value = null;
     if (detail.value.service.providerType === "MOFANG_CLOUD") {
-      const accountId = detail.value.service.providerAccountId || undefined;
-      const remoteId = detail.value.service.providerResourceId || "";
-      const tasks: [
-        Promise<MofangServiceResourcesResponse>,
-        Promise<{ items: MofangSyncLogItem[]; total: number }>,
-        Promise<MofangInstanceDetail | null>
-      ] = [
+      const [resourceData, logData] = await Promise.all([
         fetchMofangServiceResources(route.params.id as string),
-        fetchMofangSyncLogs({ serviceId: detail.value.service.id, limit: 20 }),
-        remoteId ? fetchMofangInstanceDetail(remoteId, accountId) : Promise.resolve(null)
-      ];
-      const [resourceData, logData, instanceData] = await Promise.all(tasks);
+        fetchMofangSyncLogs({ serviceId: detail.value.service.id, limit: 20 })
+      ]);
       resources.value = resourceData;
       syncLogs.value = logData.items;
-      instanceDetail.value = instanceData;
     }
   } finally {
     loading.value = false;
@@ -754,31 +644,10 @@ async function handleSimpleAction(action: "activate" | "suspend" | "terminate" |
 
 async function handleResetPassword() {
   if (!detail.value) return;
-  const password = resetForm.password.trim();
-  if (!password) {
-    ElMessage.warning("请输入新的实例密码");
-    return;
-  }
   actionLoading.value = "reset-password";
   try {
-    if (isRemoteManagedService.value) {
-      const accountId = detail.value.service.providerAccountId || undefined;
-      const result = await runMofangInstanceAction(
-        detail.value.service.providerResourceId,
-        "reset-password",
-        { password },
-        accountId
-      );
-      ElMessage.success(result.message || "远端实例密码重置任务已提交");
-      try {
-        await syncMofangService(detail.value.service.id);
-      } catch {
-        // Ignore sync lag and still refresh detail below.
-      }
-    } else {
-      await runServiceAction(detail.value.service.id, "reset-password", { password });
-      ElMessage.success("重置密码任务已提交");
-    }
+    await runServiceAction(detail.value.service.id, "reset-password", { password: resetForm.password.trim() });
+    ElMessage.success("重置密码任务已提交");
     resetVisible.value = false;
     resetForm.password = "";
     await loadDetail();
@@ -791,40 +660,13 @@ async function handleResetPassword() {
 
 async function handleReinstall() {
   if (!detail.value) return;
-  const imageName = reinstallForm.imageName.trim();
-  if (!imageName) {
-    ElMessage.warning("请输入系统镜像名称");
-    return;
-  }
   actionLoading.value = "reinstall";
   try {
-    if (isRemoteManagedService.value) {
-      await ElMessageBox.confirm(
-        `确认对实例 ${detail.value.service.providerResourceId} 发起重装系统？当前镜像将切换为 ${imageName}。`,
-        "远端实例重装确认",
-        { type: "warning" }
-      );
-      const accountId = detail.value.service.providerAccountId || undefined;
-      const result = await runMofangInstanceAction(
-        detail.value.service.providerResourceId,
-        "reinstall",
-        { imageName },
-        accountId
-      );
-      ElMessage.success(result.message || "远端实例重装任务已提交");
-      try {
-        await syncMofangService(detail.value.service.id);
-      } catch {
-        // Ignore sync lag and still refresh detail below.
-      }
-    } else {
-      await runServiceAction(detail.value.service.id, "reinstall", { imageName });
-      ElMessage.success("重装系统任务已提交");
-    }
+    await runServiceAction(detail.value.service.id, "reinstall", { imageName: reinstallForm.imageName.trim() });
+    ElMessage.success("重装系统任务已提交");
     reinstallVisible.value = false;
     await loadDetail();
   } catch (error: any) {
-    if (error === "cancel" || error === "close") return;
     ElMessage.error(error?.message ?? "重装系统失败");
   } finally {
     actionLoading.value = "";
@@ -845,57 +687,96 @@ async function handleSync() {
   }
 }
 
-async function handleRemoteInstanceAction(
-  action: RemoteInstanceAction,
-  options?: {
-    label?: string;
-    confirmText?: string;
-    syncAfter?: boolean;
-  }
-) {
-  if (!detail.value?.service.providerResourceId) return;
+function openOrderWorkbench() {
+  if (!detail.value?.order) return;
+  void router.push(`/orders/detail/${detail.value.order.id}`);
+}
 
-  if (options?.confirmText) {
-    try {
-      await ElMessageBox.confirm(options.confirmText, "远端实例操作确认", { type: "warning" });
-    } catch {
-      return;
-    }
-  }
+function openInvoiceWorkbench() {
+  if (!detail.value?.invoice) return;
+  void router.push(`/billing/invoices/${detail.value.invoice.id}`);
+}
 
-  remoteActionLoading.value = action;
-  try {
-    const accountId = detail.value.service.providerAccountId || undefined;
-    const result = await runMofangInstanceAction(detail.value.service.providerResourceId, action, undefined, accountId);
-    if (action === "get-vnc") {
-      consolePayload.value = result.response ?? null;
-      const consoleUrl = buildVncPageUrl(consolePayload.value, {
-        ip: detail.value.service.ipAddress,
-        title: instanceDetail.value?.name || detail.value.service.serviceNo
-      });
-      if (consoleUrl && openConsoleWindow(consoleUrl)) {
-        ElMessage.success(result.message || "已打开控制台");
-        return;
-      }
-      consoleVisible.value = true;
-      ElMessage.success(result.message || "已获取控制台连接信息");
-      return;
+function openTicketCreateWorkbench() {
+  if (!detail.value) return;
+  void router.push({
+    path: "/tickets/create",
+    query: {
+      customerId: String(detail.value.service.customerId),
+      serviceId: String(detail.value.service.id),
+      title: `${detail.value.service.serviceNo} / ${detail.value.service.productName}`
     }
+  });
+}
 
-    ElMessage.success(result.message || `${options?.label || action} 已提交`);
-    if (options?.syncAfter !== false) {
-      try {
-        await syncMofangService(detail.value.service.id);
-      } catch {
-        // Ignore pull-sync lag and still refresh local detail.
-      }
+function openTicketListWorkbench() {
+  if (!detail.value) return;
+  void router.push({
+    path: "/tickets/list",
+    query: {
+      serviceId: String(detail.value.service.id),
+      customerId: String(detail.value.service.customerId)
     }
-    await loadDetail();
-  } catch (error: any) {
-    ElMessage.error(error?.message ?? `${options?.label || action} 失败`);
-  } finally {
-    remoteActionLoading.value = "";
-  }
+  });
+}
+
+function openProviderResourcesWorkbench() {
+  if (!detail.value) return;
+  void router.push({
+    path: "/providers/resources",
+    query: {
+      providerType: detail.value.service.providerType,
+      accountId: detail.value.service.providerAccountId ? String(detail.value.service.providerAccountId) : undefined,
+      serviceId: String(detail.value.service.id)
+    }
+  });
+}
+
+function openProviderAccountsWorkbench() {
+  if (!detail.value) return;
+  void router.push({
+    path: "/providers/accounts",
+    query: {
+      providerType: detail.value.service.providerType,
+      accountId: detail.value.service.providerAccountId ? String(detail.value.service.providerAccountId) : undefined
+    }
+  });
+}
+
+function openProviderAutomationWorkbench() {
+  if (!detail.value) return;
+  void router.push({
+    path: "/providers/automation",
+    query: {
+      channel: detail.value.service.providerType,
+      serviceId: String(detail.value.service.id)
+    }
+  });
+}
+
+function openChangeOrdersWorkbench(filters?: { status?: string; executionStatus?: string }) {
+  if (!detail.value) return;
+  void router.push({
+    path: "/orders/change-orders",
+    query: {
+      serviceId: String(detail.value.service.id),
+      status: filters?.status || undefined,
+      executionStatus: filters?.executionStatus || undefined
+    }
+  });
+}
+
+function openProviderAutomationContext(params?: { orderId?: number; invoiceId?: number }) {
+  if (!detail.value) return;
+  void router.push({
+    path: "/providers/automation",
+    query: {
+      channel: detail.value.service.providerType,
+      serviceId: String(detail.value.service.id),
+      orderId: params?.orderId ? String(params.orderId) : undefined,
+      invoiceId: params?.invoiceId ? String(params.invoiceId) : undefined
+    }
+  });
 }
 
 function openResourceDialog(action: ResourceDialogAction, payload?: { id?: string; sizeGb?: number }) {
@@ -1083,8 +964,10 @@ onMounted(async () => {
 
               <div class="panel-card">
                 <div class="section-card__head">
-                  <strong>实例动作</strong>
-                  <span class="section-card__meta">电源、密码、重装和同步</span>
+                  <strong>{{ isMofangService ? "实例动作" : "服务动作" }}</strong>
+                  <span class="section-card__meta">
+                    {{ isMofangService ? "电源、密码、重装和同步" : "状态维护、人工校正和业务协同" }}
+                  </span>
                 </div>
                 <div class="command-group__actions">
                   <el-button type="success" :loading="actionLoading === 'activate'" @click="handleSimpleAction('activate')">
@@ -1096,24 +979,19 @@ onMounted(async () => {
                   <el-button type="danger" :loading="actionLoading === 'terminate'" @click="handleSimpleAction('terminate')">
                     终止服务
                   </el-button>
-                  <el-button type="primary" plain :loading="actionLoading === 'reboot'" @click="handleSimpleAction('reboot')">
+                  <el-button
+                    v-if="isMofangService"
+                    type="primary"
+                    plain
+                    :loading="actionLoading === 'reboot'"
+                    @click="handleSimpleAction('reboot')"
+                  >
                     重启实例
                   </el-button>
-                  <el-button
-                    type="primary"
-                    plain
-                    :disabled="isRemoteManagedService && remoteActionDisabled.resetPassword"
-                    @click="resetVisible = true"
-                  >
-                    重置密码
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    plain
-                    :disabled="isRemoteManagedService && remoteActionDisabled.reinstall"
-                    @click="reinstallVisible = true"
-                  >
-                    重装系统
+                  <el-button v-if="isMofangService" type="primary" plain @click="resetVisible = true">重置密码</el-button>
+                  <el-button v-if="isMofangService" type="primary" plain @click="reinstallVisible = true">重装系统</el-button>
+                  <el-button plain @click="openTicketCreateWorkbench">
+                    创建工单
                   </el-button>
                 </div>
                 <el-alert
@@ -1121,8 +999,200 @@ onMounted(async () => {
                   type="info"
                   :closable="false"
                   show-icon
-                  title="服务动作会同时联动本地状态、自动化任务和魔方云资源同步记录。"
+                  :title="
+                    isMofangService
+                      ? '服务动作会同时联动本地状态、自动化任务和渠道资源同步记录。'
+                      : '当前服务以本地状态、账单、工单和自动化协同为主。'
+                  "
                 />
+              </div>
+            </div>
+
+            <div class="portal-grid portal-grid--two" style="margin-top: 16px">
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>业务联动</strong>
+                  <span class="section-card__meta">围绕订单、账单和工单继续处理当前服务</span>
+                </div>
+                <div class="summary-strip">
+                  <div class="summary-pill"><span>订单</span><strong>{{ detail.order?.orderNo || "-" }}</strong></div>
+                  <div class="summary-pill"><span>账单</span><strong>{{ detail.invoice?.invoiceNo || "-" }}</strong></div>
+                  <div class="summary-pill"><span>服务</span><strong>{{ detail.service.serviceNo }}</strong></div>
+                </div>
+                <div class="command-group__actions" style="margin-top: 16px">
+                  <el-button plain :disabled="!detail.order" @click="openOrderWorkbench">订单工作台</el-button>
+                  <el-button type="primary" plain :disabled="!detail.invoice" @click="openInvoiceWorkbench">账单工作台</el-button>
+                  <el-button plain @click="openTicketListWorkbench">工单中心</el-button>
+                  <el-button plain @click="openTicketCreateWorkbench">代客建单</el-button>
+                </div>
+              </div>
+
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>渠道联动</strong>
+                  <span class="section-card__meta">从服务直接进入渠道资源、自动化和接口账户工作台</span>
+                </div>
+                <div class="summary-strip">
+                  <div class="summary-pill"><span>渠道</span><strong>{{ providerTypeLabel(detail.service.providerType) }}</strong></div>
+                  <div class="summary-pill"><span>账户</span><strong>{{ detail.service.providerAccountId || "-" }}</strong></div>
+                  <div class="summary-pill"><span>远端资源</span><strong>{{ detail.service.providerResourceId || "-" }}</strong></div>
+                </div>
+                <div class="command-group__actions" style="margin-top: 16px">
+                  <el-button type="primary" plain @click="openProviderResourcesWorkbench">渠道资源</el-button>
+                  <el-button plain @click="openProviderAutomationWorkbench">自动化任务</el-button>
+                  <el-button plain @click="openProviderAccountsWorkbench">接口账户</el-button>
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="渠道动作中心">
+            <div class="portal-grid portal-grid--three">
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>渠道策略</strong>
+                  <span class="section-card__meta">{{ channelCapabilitySummary.providerLabel }}</span>
+                </div>
+                <el-alert
+                  :type="channelStrategyGuide.type"
+                  :title="channelStrategyGuide.title"
+                  :description="channelStrategyGuide.description"
+                  :closable="false"
+                  show-icon
+                />
+                <div class="summary-strip" style="margin-top: 16px">
+                  <div class="summary-pill"><span>接口账户</span><strong>{{ serviceAccount?.name || detail.service.providerAccountId || "-" }}</strong></div>
+                  <div class="summary-pill"><span>远端资源</span><strong>{{ detail.service.providerResourceId || "-" }}</strong></div>
+                  <div class="summary-pill"><span>同步状态</span><strong>{{ formatSyncStatus(localeStore.locale, detail.service.syncStatus || "") }}</strong></div>
+                </div>
+              </div>
+
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>生命周期动作</strong>
+                  <span class="section-card__meta">状态变更与实例控制</span>
+                </div>
+                <div class="command-group__actions">
+                  <el-button type="success" :loading="actionLoading === 'activate'" @click="handleSimpleAction('activate')">
+                    恢复运行
+                  </el-button>
+                  <el-button type="warning" :loading="actionLoading === 'suspend'" @click="handleSimpleAction('suspend')">
+                    暂停服务
+                  </el-button>
+                  <el-button type="danger" :loading="actionLoading === 'terminate'" @click="handleSimpleAction('terminate')">
+                    终止服务
+                  </el-button>
+                  <el-button
+                    type="primary"
+                    plain
+                    :disabled="!channelCapabilitySummary.canReboot"
+                    :loading="actionLoading === 'reboot'"
+                    @click="handleSimpleAction('reboot')"
+                  >
+                    重启实例
+                  </el-button>
+                </div>
+                <div class="section-card__meta" style="margin-top: 16px">
+                  {{
+                    channelCapabilitySummary.canReboot
+                      ? "当前渠道支持实例级生命周期动作，执行后会联动自动化任务和同步状态。"
+                      : "当前渠道以本地状态维护为主，不提供实例级重启能力。"
+                  }}
+                </div>
+              </div>
+
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>系统与同步</strong>
+                  <span class="section-card__meta">凭据、镜像、资源回拉</span>
+                </div>
+                <div class="command-group__actions">
+                  <el-button type="primary" plain :disabled="!channelCapabilitySummary.canCredential" @click="resetVisible = true">
+                    重置密码
+                  </el-button>
+                  <el-button type="primary" plain :disabled="!channelCapabilitySummary.canCredential" @click="reinstallVisible = true">
+                    重装系统
+                  </el-button>
+                  <el-button type="primary" plain :disabled="!channelCapabilitySummary.canSync" :loading="syncLoading" @click="handleSync">
+                    拉取信息
+                  </el-button>
+                  <el-button plain @click="openProviderAutomationWorkbench">查看自动化</el-button>
+                </div>
+                <div class="section-card__meta" style="margin-top: 16px">
+                  {{
+                    channelCapabilitySummary.canSync
+                      ? "当前渠道支持从上游回拉资源与状态信息。"
+                      : "当前渠道以人工维护和本地协同为主，建议通过工单、订单和审计记录处理。"
+                  }}
+                </div>
+              </div>
+            </div>
+
+            <div class="portal-grid portal-grid--two" style="margin-top: 16px">
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>改配与资源收口</strong>
+                  <span class="section-card__meta">资源动作、改配单、账单收口</span>
+                </div>
+                <div class="summary-strip">
+                  <div class="summary-pill"><span>改配总数</span><strong>{{ changeOrderSummary.total }}</strong></div>
+                  <div class="summary-pill"><span>待支付</span><strong>{{ changeOrderSummary.unpaid }}</strong></div>
+                  <div class="summary-pill"><span>待执行</span><strong>{{ changeOrderSummary.waitingExecution }}</strong></div>
+                  <div class="summary-pill"><span>执行异常</span><strong>{{ changeOrderSummary.failedExecution }}</strong></div>
+                </div>
+                <el-alert
+                  style="margin-top: 12px"
+                  :type="channelCapabilitySummary.canResourceAction ? 'info' : 'warning'"
+                  :closable="false"
+                  show-icon
+                  :title="
+                    channelCapabilitySummary.canResourceAction
+                      ? '当前渠道支持资源级扩容与数据保护动作，建议改配后立即回到账单和改配单工作台收口。'
+                      : '当前渠道不提供资源级动作，建议通过改配单、账单、工单和人工调整完成业务收口。'
+                  "
+                />
+                <div class="command-group__actions" style="margin-top: 16px">
+                  <el-button type="primary" plain :disabled="!channelCapabilitySummary.canResourceAction" @click="openResourceDialog('add-ipv4')">
+                    新增 IPv4
+                  </el-button>
+                  <el-button type="primary" plain :disabled="!channelCapabilitySummary.canResourceAction" @click="openResourceDialog('add-disk')">
+                    新增数据盘
+                  </el-button>
+                  <el-button plain @click="openChangeOrdersWorkbench()">改配单工作台</el-button>
+                  <el-button
+                    plain
+                    :disabled="changeOrderSummary.unpaid === 0"
+                    @click="openChangeOrdersWorkbench({ status: 'UNPAID' })"
+                  >
+                    待支付改配
+                  </el-button>
+                  <el-button
+                    plain
+                    :disabled="changeOrderSummary.failedExecution === 0"
+                    @click="openChangeOrdersWorkbench({ executionStatus: 'EXECUTE_FAILED' })"
+                  >
+                    执行异常
+                  </el-button>
+                  <el-button type="primary" plain :disabled="!detail.invoice" @click="openInvoiceWorkbench">账单工作台</el-button>
+                </div>
+              </div>
+
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>渠道联查入口</strong>
+                  <span class="section-card__meta">接口账户、资源、任务与工单协同</span>
+                </div>
+                <div class="summary-strip">
+                  <div class="summary-pill"><span>工单入口</span><strong>已接通</strong></div>
+                  <div class="summary-pill"><span>自动化</span><strong>{{ detail.service.providerType || "-" }}</strong></div>
+                  <div class="summary-pill"><span>同步日志</span><strong>{{ syncLogs.length }}</strong></div>
+                </div>
+                <div class="command-group__actions" style="margin-top: 16px">
+                  <el-button plain @click="openProviderAccountsWorkbench">接口账户</el-button>
+                  <el-button type="primary" plain @click="openProviderResourcesWorkbench">渠道资源</el-button>
+                  <el-button plain @click="openProviderAutomationWorkbench">自动化任务</el-button>
+                  <el-button plain @click="openTicketListWorkbench">工单中心</el-button>
+                </div>
               </div>
             </div>
           </el-tab-pane>
@@ -1167,198 +1237,7 @@ onMounted(async () => {
             </div>
           </el-tab-pane>
 
-          <el-tab-pane v-if="instanceDetail" label="远端实例">
-            <div class="summary-strip">
-              <div class="summary-pill"><span>上游实例</span><strong>{{ instanceDetail.remoteId }}</strong></div>
-              <div class="summary-pill"><span>节点</span><strong>{{ renderValue(pickString(remoteRaw, "node_name") || pickString(remoteRaw, "kvmid")) }}</strong></div>
-              <div class="summary-pill"><span>上游状态</span><strong>{{ remoteStatusLabel(pickString(remoteRaw, "status") || instanceDetail.status) }}</strong></div>
-              <div class="summary-pill"><span>登录用户</span><strong>{{ renderValue(pickString(remoteRaw, "osuser") || detail.service.resourceSnapshot.loginUsername) }}</strong></div>
-            </div>
-
-            <el-alert
-              style="margin-top: 16px"
-              type="warning"
-              :closable="false"
-              show-icon
-              title="以下动作会直接操作真实魔方云实例。"
-              description="建议先核对实例编号、节点、当前上游状态，再执行开关机、救援、锁定或控制台操作。"
-            />
-
-            <div class="portal-grid portal-grid--two" style="margin-top: 16px">
-              <div class="panel-card">
-                <div class="section-card__head">
-                  <strong>远端运行信息</strong>
-                  <span class="section-card__meta">直接来自魔方云实例详情</span>
-                </div>
-                <el-descriptions :column="2" border>
-                  <el-descriptions-item label="实例名称">{{ renderValue(instanceDetail.name) }}</el-descriptions-item>
-                  <el-descriptions-item label="状态">
-                    <el-tag :type="remoteStatusType(pickString(remoteRaw, 'status') || instanceDetail.status)" effect="light">
-                      {{ remoteStatusLabel(pickString(remoteRaw, "status") || instanceDetail.status) }}
-                    </el-tag>
-                  </el-descriptions-item>
-                  <el-descriptions-item label="主机名">{{ renderValue(pickString(remoteRaw, "hostname") || detail.service.resourceSnapshot.hostname) }}</el-descriptions-item>
-                  <el-descriptions-item label="UUID">{{ renderValue(pickString(remoteRaw, "uuid")) }}</el-descriptions-item>
-                  <el-descriptions-item label="地域">{{ renderValue(instanceDetail.region || pickString(remoteRaw, "area_name") || detail.service.regionName) }}</el-descriptions-item>
-                  <el-descriptions-item label="节点">{{ renderValue(pickString(remoteRaw, "node_name")) }}</el-descriptions-item>
-                  <el-descriptions-item label="主 IP">{{ renderValue(pickString(remoteRaw, "mainip") || instanceDetail.ipAddress || detail.service.ipAddress) }}</el-descriptions-item>
-                  <el-descriptions-item label="网络类型">{{ renderValue(pickString(remoteRaw, "network_type")) }}</el-descriptions-item>
-                  <el-descriptions-item label="登录用户">{{ renderValue(pickString(remoteRaw, "osuser") || detail.service.resourceSnapshot.loginUsername) }}</el-descriptions-item>
-                  <el-descriptions-item label="系统镜像">{{ renderValue(pickString(remoteRaw, "operate_system") || detail.service.resourceSnapshot.operatingSystem) }}</el-descriptions-item>
-                  <el-descriptions-item label="CPU / 内存">{{ `${renderValue(pickNumber(remoteRaw, "cpu"))} 核 / ${renderValue(pickNumber(remoteRaw, "memory"))} GB` }}</el-descriptions-item>
-                  <el-descriptions-item label="带宽">{{ formatBandwidth(pickNumber(remoteRaw, "in_bw"), pickNumber(remoteRaw, "out_bw")) }}</el-descriptions-item>
-                  <el-descriptions-item label="流量配额">{{ formatTrafficQuota(pickNumber(remoteRaw, "traffic_quota")) }}</el-descriptions-item>
-                  <el-descriptions-item label="IPv4 / IPv6">{{ `${renderValue(pickNumber(remoteRaw, "ip_num"))} / ${renderValue(pickNumber(remoteRaw, "ipv6_num"))}` }}</el-descriptions-item>
-                  <el-descriptions-item label="控制台">{{ formatOptionalBoolean(pickBoolean(remoteRaw, "vnc")) }}</el-descriptions-item>
-                  <el-descriptions-item label="实例锁定">{{ formatOptionalBoolean(pickBoolean(remoteRaw, "lock")) }}</el-descriptions-item>
-                  <el-descriptions-item label="救援模式">{{ formatOptionalBoolean(pickBoolean(remoteRaw, "rescue")) }}</el-descriptions-item>
-                  <el-descriptions-item label="开通时间">{{ renderValue(pickString(remoteRaw, "create_time")) }}</el-descriptions-item>
-                  <el-descriptions-item label="上游客户">
-                    {{ renderValue(pickString(remoteUser, "email") || pickString(remoteUser, "username") || pickString(remoteRaw, "username")) }}
-                  </el-descriptions-item>
-                </el-descriptions>
-              </div>
-
-              <div class="panel-card">
-                <div class="section-card__head">
-                  <strong>远端控制动作</strong>
-                  <span class="section-card__meta">控制台、电源、救援、锁定</span>
-                </div>
-                <div class="command-group__actions">
-                  <el-button
-                    type="primary"
-                    plain
-                    :disabled="remoteActionDisabled.getVnc"
-                    :loading="remoteActionLoading === 'get-vnc'"
-                    @click="handleRemoteInstanceAction('get-vnc', { label: '获取控制台', syncAfter: false })"
-                  >
-                    获取控制台
-                  </el-button>
-                  <el-button
-                    type="success"
-                    plain
-                    :disabled="remoteActionDisabled.powerOn"
-                    :loading="remoteActionLoading === 'power-on'"
-                    @click="handleRemoteInstanceAction('power-on', { label: '实例开机' })"
-                  >
-                    开机
-                  </el-button>
-                  <el-button
-                    type="warning"
-                    plain
-                    :disabled="remoteActionDisabled.powerOff"
-                    :loading="remoteActionLoading === 'power-off'"
-                    @click="handleRemoteInstanceAction('power-off', { label: '实例关机', confirmText: '确认对当前实例执行关机？' })"
-                  >
-                    关机
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    plain
-                    :disabled="remoteActionDisabled.reboot"
-                    :loading="remoteActionLoading === 'reboot'"
-                    @click="handleRemoteInstanceAction('reboot', { label: '实例重启', confirmText: '确认重启当前实例？' })"
-                  >
-                    重启实例
-                  </el-button>
-                  <el-button
-                    type="danger"
-                    plain
-                    :disabled="remoteActionDisabled.hardPowerOff"
-                    :loading="remoteActionLoading === 'hard-power-off'"
-                    @click="handleRemoteInstanceAction('hard-power-off', { label: '强制关机', confirmText: '确认强制关闭当前实例？这会直接中断运行中的业务。' })"
-                  >
-                    强制关机
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    plain
-                    :disabled="remoteActionDisabled.hardReboot"
-                    :loading="remoteActionLoading === 'hard-reboot'"
-                    @click="handleRemoteInstanceAction('hard-reboot', { label: '强制重启', confirmText: '确认强制重启当前实例？' })"
-                  >
-                    强制重启
-                  </el-button>
-                  <el-button
-                    type="warning"
-                    plain
-                    :disabled="remoteActionDisabled.suspend"
-                    :loading="remoteActionLoading === 'suspend'"
-                    @click="handleRemoteInstanceAction('suspend', { label: '暂停实例', confirmText: '确认暂停当前实例？暂停后实例将无法继续运行。' })"
-                  >
-                    暂停实例
-                  </el-button>
-                  <el-button
-                    type="warning"
-                    plain
-                    :disabled="remoteActionDisabled.unsuspend"
-                    :loading="remoteActionLoading === 'unsuspend'"
-                    @click="handleRemoteInstanceAction('unsuspend', { label: '解除暂停' })"
-                  >
-                    解除暂停
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    plain
-                    :disabled="remoteActionDisabled.rescueStart"
-                    :loading="remoteActionLoading === 'rescue-start'"
-                    @click="handleRemoteInstanceAction('rescue-start', { label: '进入救援', confirmText: '确认让实例进入救援模式？' })"
-                  >
-                    进入救援
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    plain
-                    :disabled="remoteActionDisabled.rescueStop"
-                    :loading="remoteActionLoading === 'rescue-stop'"
-                    @click="handleRemoteInstanceAction('rescue-stop', { label: '退出救援' })"
-                  >
-                    退出救援
-                  </el-button>
-                  <el-button
-                    type="danger"
-                    plain
-                    :disabled="remoteActionDisabled.lock"
-                    :loading="remoteActionLoading === 'lock'"
-                    @click="handleRemoteInstanceAction('lock', { label: '锁定实例', confirmText: '确认锁定当前实例？锁定后部分操作会被限制。' })"
-                  >
-                    锁定实例
-                  </el-button>
-                  <el-button
-                    type="success"
-                    plain
-                    :disabled="remoteActionDisabled.unlock"
-                    :loading="remoteActionLoading === 'unlock'"
-                    @click="handleRemoteInstanceAction('unlock', { label: '解除锁定' })"
-                  >
-                    解除锁定
-                  </el-button>
-                  <el-button type="primary" plain :disabled="remoteActionDisabled.resetPassword" @click="resetVisible = true">
-                    远端重置密码
-                  </el-button>
-                  <el-button type="primary" plain :disabled="remoteActionDisabled.reinstall" @click="reinstallVisible = true">
-                    远端重装系统
-                  </el-button>
-                </div>
-
-                <el-alert
-                  style="margin-top: 16px"
-                  type="info"
-                  :closable="false"
-                  show-icon
-                  title="远端动作执行成功后，页面会自动拉取同步，方便你立即看到服务状态和资源快照变化。"
-                />
-
-                <el-descriptions v-if="consolePayload" :column="1" border style="margin-top: 16px">
-                  <el-descriptions-item v-for="item in remoteConsoleSummary" :key="item.label" :label="item.label">
-                    {{ item.value }}
-                  </el-descriptions-item>
-                </el-descriptions>
-              </div>
-            </div>
-          </el-tab-pane>
-
-          <el-tab-pane v-if="resources" label="魔方云资源">
+          <el-tab-pane v-if="resources" label="渠道资源动作">
             <div class="summary-strip">
               <div class="summary-pill"><span>IP</span><strong>{{ resources.ipAddresses.length }}</strong></div>
               <div class="summary-pill"><span>磁盘</span><strong>{{ resources.disks.length }}</strong></div>
@@ -1371,8 +1250,8 @@ onMounted(async () => {
               type="info"
               :closable="false"
               show-icon
-              title="这里的操作会直接调用魔方云接口，并把结果写入同步日志和自动化任务。"
-              description="建议按“网络扩容、存储扩容、数据保护”顺序操作。做扩容或保护前，先核对当前实例编号、磁盘列表和公网地址。"
+              title="这里的操作会直接调用当前云资源渠道接口，并把结果写入同步日志和自动化任务。"
+              description="建议按“网络扩容、存储扩容、数据保护”顺序操作。执行前先核对当前渠道、实例编号、磁盘列表和公网地址。"
             />
 
             <div class="portal-grid portal-grid--three" style="margin-top: 16px">
@@ -1595,6 +1474,14 @@ onMounted(async () => {
                 </template>
               </el-table-column>
               <el-table-column prop="message" label="回执" min-width="320" show-overflow-tooltip />
+              <el-table-column label="操作" min-width="170" fixed="right">
+                <template #default>
+                  <div class="inline-actions">
+                    <el-button type="primary" link @click="openProviderResourcesWorkbench">资源</el-button>
+                    <el-button type="primary" link @click="openProviderAutomationWorkbench">任务</el-button>
+                  </div>
+                </template>
+              </el-table-column>
             </el-table>
           </el-tab-pane>
 
@@ -1603,6 +1490,9 @@ onMounted(async () => {
               <div class="section-card__head">
                 <strong>改配单执行记录</strong>
                 <span class="section-card__meta">生成改配单、收款执行、退款回退都在这里查看</span>
+              </div>
+              <div class="inline-actions" style="margin-bottom: 12px">
+                <el-button type="primary" link @click="router.push(`/orders/change-orders?serviceId=${detail.service.id}`)">打开改配单工作台</el-button>
               </div>
               <el-table :data="detail.changeOrders" border stripe empty-text="当前服务还没有改配记录">
                 <el-table-column prop="invoiceNo" label="改配账单" min-width="150" />
@@ -1637,6 +1527,9 @@ onMounted(async () => {
                     <div class="inline-actions">
                       <el-button type="primary" link @click="router.push(`/orders/detail/${row.orderId}`)">订单</el-button>
                       <el-button type="primary" link @click="router.push(`/billing/invoices/${row.invoiceId}`)">账单</el-button>
+                      <el-button type="primary" link @click="openProviderAutomationContext({ orderId: row.orderId, invoiceId: row.invoiceId })">
+                        任务
+                      </el-button>
                     </div>
                   </template>
                 </el-table-column>
@@ -1732,14 +1625,6 @@ onMounted(async () => {
 
     <el-dialog v-model="resetVisible" title="重置密码" width="420px">
       <el-form label-position="top">
-        <el-alert
-          v-if="isRemoteManagedService"
-          type="warning"
-          :closable="false"
-          show-icon
-          title="该操作会直接下发到真实魔方云实例。"
-          style="margin-bottom: 16px"
-        />
         <el-form-item label="新密码">
           <el-input v-model="resetForm.password" type="password" show-password />
         </el-form-item>
@@ -1752,14 +1637,6 @@ onMounted(async () => {
 
     <el-dialog v-model="reinstallVisible" title="重装系统" width="420px">
       <el-form label-position="top">
-        <el-alert
-          v-if="isRemoteManagedService"
-          type="warning"
-          :closable="false"
-          show-icon
-          title="重装会直接作用于真实实例，请确认镜像名称和业务窗口。"
-          style="margin-bottom: 16px"
-        />
         <el-form-item label="系统镜像">
           <el-input v-model="reinstallForm.imageName" />
         </el-form-item>
@@ -1767,27 +1644,6 @@ onMounted(async () => {
       <template #footer>
         <el-button @click="reinstallVisible = false">取消</el-button>
         <el-button type="primary" :loading="actionLoading === 'reinstall'" @click="handleReinstall">确认重装</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="consoleVisible" title="控制台连接信息" width="620px">
-      <el-alert
-        type="warning"
-        :closable="false"
-        show-icon
-        title="以下信息包含真实实例控制台凭证，请按最小范围使用。"
-        style="margin-bottom: 16px"
-      />
-      <el-descriptions :column="1" border>
-        <el-descriptions-item v-for="item in remoteConsoleSummary" :key="item.label" :label="item.label">
-          {{ item.value }}
-        </el-descriptions-item>
-      </el-descriptions>
-      <template #footer>
-        <el-button @click="consoleVisible = false">关闭</el-button>
-        <el-button v-if="consoleLaunchUrl" type="primary" @click="openConsoleWindow(consoleLaunchUrl)">
-          打开控制台
-        </el-button>
       </template>
     </el-dialog>
 

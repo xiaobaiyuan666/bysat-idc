@@ -20,18 +20,24 @@ const copy = computed(() => ({
   heroTitle: pickLabel(localeStore.locale, "把财务、服务、工单和客户运营放在同一张后台里。", "Run finance, services, tickets, and customers from one admin console."),
   heroSubtitle: pickLabel(
     localeStore.locale,
-    "这套后台现在已经接入 MySQL 真数据链路，工作台、客户、订单、账单、服务和统计报表都统一在同一套运营壳层里。",
-    "This admin now runs on real MySQL data, with workbench, customers, orders, invoices, services, and reports unified in one shell."
+    "江苏白猿网络科技有限公司 · 猿创软件业务组维护。后台已接入 MySQL 真数据链路，工作台、客户、订单、账单、服务和统计报表统一在同一套运营壳层里。",
+    "Maintained by Jiangsu Baiyuan Network Technology Co., Ltd. The admin now runs on real MySQL data with workbench, customers, orders, invoices, services, and reports unified in one shell."
   ),
   featureA: pickLabel(localeStore.locale, "运营工作台", "Operations Workbench"),
   featureADesc: pickLabel(localeStore.locale, "集中处理实名认证、逾期账单、到期服务和工单待办。", "Handle identity review, overdue invoices, expiring services, and pending tickets in one place."),
   featureB: pickLabel(localeStore.locale, "财务主链", "Billing Chain"),
   featureBDesc: pickLabel(localeStore.locale, "订单、账单、收款、退款和服务状态回写已经打通。", "Orders, invoices, payments, refunds, and service status are linked together."),
   featureC: pickLabel(localeStore.locale, "公有云业务中心", "Cloud Operations"),
-  featureCDesc: pickLabel(localeStore.locale, "商品配置、资源快照、实例动作和服务工作台已统一进后台视图。", "Product setup, resource snapshots, instance actions, and service workbenches are unified."),
+  featureCDesc: pickLabel(localeStore.locale, "商品配置、资源快照、实例动作和服务工作台已经统一进后台视图。", "Product setup, resource snapshots, instance actions, and service workbenches are unified."),
   loginTitle: pickLabel(localeStore.locale, "登录后台", "Admin Login"),
   loginSubtitle: pickLabel(localeStore.locale, "使用管理员账号进入客户、财务和服务运营工作台。", "Use the administrator account to enter the operations console."),
   defaultAccount: pickLabel(localeStore.locale, "默认账号", "Default account"),
+  declarationTitle: pickLabel(localeStore.locale, "版权声明", "Copyright"),
+  declarationText: pickLabel(
+    localeStore.locale,
+    "本系统由江苏白猿网络科技有限公司 - 猿创软件业务组 100% AI 开发，全部著作权归江苏白猿网络科技有限公司所有。官网：www.bysat.com",
+    "This system is 100% AI-developed by Jiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Business Group, with full copyright owned by Jiangsu Baiyuan Network Technology Co., Ltd. Website: www.bysat.com"
+  ),
   username: pickLabel(localeStore.locale, "用户名", "Username"),
   password: pickLabel(localeStore.locale, "密码", "Password"),
   submit: pickLabel(localeStore.locale, "进入后台", "Enter Admin"),
@@ -59,7 +65,7 @@ async function handleSubmit() {
     <div class="page-card login-card">
       <section class="login-hero">
         <div class="login-hero__toolbar">
-          <div class="login-hero__eyebrow">IDC Operation Center</div>
+          <div class="login-hero__eyebrow">BYSAT Cloud Operations</div>
           <el-button-group>
             <el-button
               v-for="item in localeOptions"
@@ -101,6 +107,11 @@ async function handleSubmit() {
           <strong>{{ copy.defaultAccount }}</strong><br />
           {{ copy.username }}：`admin`<br />
           {{ copy.password }}：`Admin123!`
+        </div>
+
+        <div class="login-tips">
+          <strong>{{ copy.declarationTitle }}</strong><br />
+          {{ copy.declarationText }}
         </div>
 
         <el-form label-position="top">

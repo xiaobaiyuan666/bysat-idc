@@ -31,6 +31,12 @@ func (handler *Handler) RegisterAdminRoutes(router *gin.RouterGroup) {
 	router.PATCH("/invoices/:id", handler.adminUpdateUnpaidInvoice)
 	router.POST("/invoices/:id/receive-payment", handler.adminReceivePayment)
 	router.POST("/invoices/:id/refund", handler.adminRefundInvoice)
+	router.GET("/payments", handler.listAdminPayments)
+	router.GET("/refunds", handler.listAdminRefunds)
+	router.GET("/service-change-orders", handler.listAdminServiceChangeOrders)
+	router.GET("/accounts/transactions", handler.listAdminAccountTransactions)
+	router.GET("/accounts/customers/:id/wallet", handler.adminCustomerWallet)
+	router.POST("/accounts/customers/:id/adjustments", handler.adminAdjustCustomerWallet)
 	router.GET("/services", handler.listAdminServices)
 	router.GET("/services/:id", handler.adminServiceDetail)
 	router.PATCH("/services/:id", handler.adminUpdateService)
@@ -138,6 +144,7 @@ func (handler *Handler) RegisterPortalRoutes(router *gin.RouterGroup) {
 	router.GET("/orders", handler.listPortalOrders)
 	router.GET("/invoices", handler.listPortalInvoices)
 	router.GET("/services", handler.listPortalServices)
+	router.GET("/services/:id", handler.portalServiceDetail)
 	router.POST("/orders/checkout", handler.checkout)
 	router.POST("/invoices/:id/pay", handler.payInvoice)
 }
@@ -279,13 +286,21 @@ func (handler *Handler) adminReceivePayment(c *gin.Context) {
 	var request dto.ReceivePaymentRequest
 	_ = c.ShouldBindJSON(&request)
 
-	invoice, serviceRecord, payment, ok := handler.service.ReceiveInvoicePayment(
+	invoice, serviceRecord, payment, ok, receiveErr := handler.service.ReceiveInvoicePayment(
 		invoiceID,
 		request,
 		getAdminID(c),
 		getAdminName(c),
 		middleware.GetRequestID(c),
 	)
+	if receiveErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "RECEIVE_PAYMENT_FAILED",
+			"message":   receiveErr.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":      "INVOICE_NOT_FOUND",
@@ -342,10 +357,118 @@ func (handler *Handler) adminRefundInvoice(c *gin.Context) {
 	}, middleware.GetRequestID(c)))
 }
 
+func (handler *Handler) listAdminPayments(c *gin.Context) {
+	filter := parsePaymentListFilter(c)
+	items, total := handler.service.ListPayments(filter)
+	c.JSON(http.StatusOK, appErrors.Ok(dto.PaymentListResponse{
+		Items: items,
+		Total: total,
+	}, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) listAdminRefunds(c *gin.Context) {
+	filter := parseRefundListFilter(c)
+	items, total := handler.service.ListRefunds(filter)
+	c.JSON(http.StatusOK, appErrors.Ok(dto.RefundListResponse{
+		Items: items,
+		Total: total,
+	}, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) listAdminAccountTransactions(c *gin.Context) {
+	filter := parseAccountTransactionFilter(c)
+	items, total := handler.service.ListAccountTransactions(filter)
+	c.JSON(http.StatusOK, appErrors.Ok(dto.AccountTransactionListResponse{
+		Items: items,
+		Total: total,
+	}, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) adminCustomerWallet(c *gin.Context) {
+	customerID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "客户编号格式不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	result, ok := handler.service.GetCustomerWalletOverview(customerID, 20)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":      "CUSTOMER_NOT_FOUND",
+			"message":   "客户不存在",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(result, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) adminAdjustCustomerWallet(c *gin.Context) {
+	customerID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "客户编号格式不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	var request dto.AdjustWalletRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "钱包调整参数不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	result, ok, adjustErr := handler.service.AdjustCustomerWallet(
+		customerID,
+		request,
+		getAdminID(c),
+		getAdminName(c),
+		middleware.GetRequestID(c),
+	)
+	if adjustErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "WALLET_ADJUST_FAILED",
+			"message":   adjustErr.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":      "CUSTOMER_NOT_FOUND",
+			"message":   "客户不存在",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(result, middleware.GetRequestID(c)))
+}
+
 func (handler *Handler) listAdminServices(c *gin.Context) {
 	filter := parseServiceListFilter(c)
 	items, total := handler.service.ListServices(filter)
 	c.JSON(http.StatusOK, appErrors.Ok(dto.ServiceListResponse{
+		Items: items,
+		Total: total,
+	}, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) listAdminServiceChangeOrders(c *gin.Context) {
+	filter := parseServiceChangeOrderListFilter(c)
+	items, total := handler.service.ListServiceChangeOrders(filter)
+	c.JSON(http.StatusOK, appErrors.Ok(dto.ServiceChangeOrderListResponse{
 		Items: items,
 		Total: total,
 	}, middleware.GetRequestID(c)))
@@ -380,7 +503,7 @@ func (handler *Handler) adminUpdateService(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":      "INVALID_ARGUMENT",
-			"message":   "鏈嶅姟缂栧彿鏍煎紡涓嶆纭?",
+			"message":   "服务编号格式不正确",
 			"requestId": middleware.GetRequestID(c),
 		})
 		return
@@ -390,7 +513,7 @@ func (handler *Handler) adminUpdateService(c *gin.Context) {
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":      "INVALID_ARGUMENT",
-			"message":   "鏈嶅姟璋冩暣鍙傛暟涓嶆纭?",
+			"message":   "服务调整参数不正确",
 			"requestId": middleware.GetRequestID(c),
 		})
 		return
@@ -414,7 +537,7 @@ func (handler *Handler) adminUpdateService(c *gin.Context) {
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":      "SERVICE_NOT_FOUND",
-			"message":   "鏈嶅姟涓嶅瓨鍦紝鏃犳硶浜哄伐璋冩暣",
+			"message":   "服务不存在，无法人工调整",
 			"requestId": middleware.GetRequestID(c),
 		})
 		return
@@ -482,6 +605,35 @@ func (handler *Handler) listPortalServices(c *gin.Context) {
 	c.JSON(http.StatusOK, appErrors.Ok(dto.ServiceListResponse{
 		Items: items,
 		Total: len(items),
+	}, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) portalServiceDetail(c *gin.Context) {
+	serviceID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "服务编号格式不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	detail, ok := handler.service.GetServiceDetail(serviceID)
+	if !ok || detail.Service.CustomerID != getPortalCustomerID(c) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":      "SERVICE_NOT_FOUND",
+			"message":   "服务不存在或无权查看",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(gin.H{
+		"service":      detail.Service,
+		"order":        detail.Order,
+		"invoice":      detail.Invoice,
+		"changeOrders": detail.ChangeOrders,
 	}, middleware.GetRequestID(c)))
 }
 
@@ -647,6 +799,64 @@ func parseServiceListFilter(c *gin.Context) domain.ServiceListFilter {
 	}
 }
 
+func parseServiceChangeOrderListFilter(c *gin.Context) domain.ServiceChangeOrderListFilter {
+	return domain.ServiceChangeOrderListFilter{
+		Page:      parsePositiveInt(c.DefaultQuery("page", "1"), 1),
+		Limit:     parsePositiveInt(c.DefaultQuery("limit", "20"), 20),
+		Sort:      strings.TrimSpace(c.DefaultQuery("sort", "created_at")),
+		Order:     strings.TrimSpace(c.DefaultQuery("order", "desc")),
+		Status:    strings.TrimSpace(c.Query("status")),
+		ServiceID: parseOptionalInt64(c.Query("serviceId")),
+		OrderID:   parseOptionalInt64(c.Query("orderId")),
+		InvoiceID: parseOptionalInt64(c.Query("invoiceId")),
+		Action:    strings.TrimSpace(c.Query("action")),
+		Keyword:   strings.TrimSpace(c.Query("keyword")),
+	}
+}
+
+func parseAccountTransactionFilter(c *gin.Context) domain.AccountTransactionFilter {
+	return domain.AccountTransactionFilter{
+		Page:            parsePositiveInt(c.DefaultQuery("page", "1"), 1),
+		Limit:           parsePositiveInt(c.DefaultQuery("limit", "20"), 20),
+		Sort:            strings.TrimSpace(c.DefaultQuery("sort", "occurred_at")),
+		Order:           strings.TrimSpace(c.DefaultQuery("order", "desc")),
+		CustomerID:      parseOptionalInt64(c.Query("customerId")),
+		TransactionType: strings.TrimSpace(c.Query("transactionType")),
+		Direction:       strings.TrimSpace(c.Query("direction")),
+		Channel:         strings.TrimSpace(c.Query("channel")),
+		Keyword:         strings.TrimSpace(c.Query("keyword")),
+		StartTime:       strings.TrimSpace(c.Query("startTime")),
+		EndTime:         strings.TrimSpace(c.Query("endTime")),
+	}
+}
+
+func parsePaymentListFilter(c *gin.Context) domain.PaymentListFilter {
+	return domain.PaymentListFilter{
+		Page:       parsePositiveInt(c.DefaultQuery("page", "1"), 1),
+		Limit:      parsePositiveInt(c.DefaultQuery("limit", "20"), 20),
+		Sort:       strings.TrimSpace(c.DefaultQuery("sort", "paid_at")),
+		Order:      strings.TrimSpace(c.DefaultQuery("order", "desc")),
+		CustomerID: parseOptionalInt64(firstNonEmptyQueryValue(c, "customerId", "uid")),
+		InvoiceID:  parseOptionalInt64(c.Query("invoiceId")),
+		Keyword:    strings.TrimSpace(firstNonEmptyQueryValue(c, "keyword", "paymentNo", "tradeNo")),
+		Channel:    strings.TrimSpace(c.Query("channel")),
+		Status:     strings.TrimSpace(c.Query("status")),
+	}
+}
+
+func parseRefundListFilter(c *gin.Context) domain.RefundListFilter {
+	return domain.RefundListFilter{
+		Page:       parsePositiveInt(c.DefaultQuery("page", "1"), 1),
+		Limit:      parsePositiveInt(c.DefaultQuery("limit", "20"), 20),
+		Sort:       strings.TrimSpace(c.DefaultQuery("sort", "created_at")),
+		Order:      strings.TrimSpace(c.DefaultQuery("order", "desc")),
+		CustomerID: parseOptionalInt64(firstNonEmptyQueryValue(c, "customerId", "uid")),
+		InvoiceID:  parseOptionalInt64(c.Query("invoiceId")),
+		Keyword:    strings.TrimSpace(firstNonEmptyQueryValue(c, "keyword", "refundNo")),
+		Status:     strings.TrimSpace(c.Query("status")),
+	}
+}
+
 func parsePositiveInt(value string, fallback int) int {
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed <= 0 {
@@ -661,4 +871,13 @@ func parseOptionalInt64(value string) int64 {
 		return 0
 	}
 	return parsed
+}
+
+func firstNonEmptyQueryValue(c *gin.Context, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(c.Query(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }

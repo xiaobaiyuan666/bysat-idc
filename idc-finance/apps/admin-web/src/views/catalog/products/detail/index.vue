@@ -362,6 +362,41 @@ function buildResourceTemplateFromRemote(template: UpstreamProductTemplate) {
   };
 }
 
+function cloneConfigOptions(options: ProductConfigOption[]) {
+  return options.map(item => ({
+    ...item,
+    choices: item.choices.map(choice => ({ ...choice }))
+  }));
+}
+
+function applyRemotePricing() {
+  if (!product.value || !remoteTemplate.value) return;
+  product.value.pricing = remoteTemplate.value.pricing.map(item => ({ ...item }));
+  ElMessage.success("已将上游价格差异回填到本地价格矩阵");
+}
+
+function applyRemoteConfigOptions() {
+  if (!product.value || !remoteTemplate.value) return;
+  product.value.configOptions = cloneConfigOptions(remoteTemplate.value.configOptions);
+  ElMessage.success("已将上游配置项回填到本地配置草稿");
+}
+
+function applyRemoteResourceTemplate() {
+  if (!product.value || !remoteTemplate.value) return;
+  product.value.resourceTemplate = {
+    ...product.value.resourceTemplate,
+    ...buildResourceTemplateFromRemote(remoteTemplate.value)
+  };
+  ElMessage.success("已将上游模板推导结果回填到本地云模板");
+}
+
+function applyRemoteAll() {
+  applyRemotePricing();
+  applyRemoteConfigOptions();
+  applyRemoteResourceTemplate();
+  ElMessage.success("已将上游价格、配置项和云模板全部回填到本地草稿");
+}
+
 function applyPreset(channel: "LOCAL" | "MOFANG_CLOUD" | "ZJMF_API") {
   if (!product.value) return;
   if (channel === "LOCAL") {
@@ -545,6 +580,82 @@ async function handleSync() {
   }
 }
 
+function openAutomationAccountWorkbench() {
+  if (!product.value?.automationConfig.providerAccountId) return;
+  void router.push({
+    path: "/providers/accounts",
+    query: {
+      providerType: product.value.automationConfig.channel,
+      accountId: String(product.value.automationConfig.providerAccountId)
+    }
+  });
+}
+
+function openUpstreamAccountWorkbench() {
+  if (!product.value?.upstreamMapping.providerAccountId) return;
+  void router.push({
+    path: "/providers/accounts",
+    query: {
+      providerType: product.value.upstreamMapping.providerType,
+      accountId: String(product.value.upstreamMapping.providerAccountId)
+    }
+  });
+}
+
+function openProductOrdersWorkbench() {
+  if (!product.value) return;
+  void router.push({
+    path: "/orders/list",
+    query: {
+      productName: product.value.name
+    }
+  });
+}
+
+function openProductServicesWorkbench() {
+  if (!product.value) return;
+  void router.push({
+    path: "/services/list",
+    query: {
+      keyword: product.value.name,
+      providerType: product.value.automationConfig.channel !== "LOCAL" ? product.value.automationConfig.channel : undefined,
+      providerAccountId: product.value.automationConfig.providerAccountId
+        ? String(product.value.automationConfig.providerAccountId)
+        : undefined
+    }
+  });
+}
+
+function openProductAutomationWorkbench() {
+  if (!product.value) return;
+  void router.push({
+    path: "/providers/automation",
+    query: {
+      sourceType: "product",
+      sourceId: String(product.value.id),
+      channel: product.value.automationConfig.channel !== "LOCAL" ? product.value.automationConfig.channel : undefined
+    }
+  });
+}
+
+function openProductResourcesWorkbench() {
+  if (!product.value) return;
+  const accountId = product.value.automationConfig.providerAccountId || product.value.upstreamMapping.providerAccountId;
+  const providerType =
+    product.value.automationConfig.channel !== "LOCAL"
+      ? product.value.automationConfig.channel
+      : product.value.upstreamMapping.providerType !== "NONE"
+        ? product.value.upstreamMapping.providerType
+        : undefined;
+  void router.push({
+    path: "/providers/resources",
+    query: {
+      providerType,
+      accountId: accountId ? String(accountId) : undefined
+    }
+  });
+}
+
 watch(
   () => route.params.id,
   () => {
@@ -713,6 +824,29 @@ onMounted(async () => {
                   <el-descriptions-item label="上游编码">{{ product.upstreamMapping.remoteProductCode || "-" }}</el-descriptions-item>
                   <el-descriptions-item label="同步状态">{{ formatSyncStatus(product.upstreamMapping.syncStatus) }}</el-descriptions-item>
                 </el-descriptions>
+              </div>
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>业务联动</strong>
+                  <span class="section-card__meta">从商品直接跳到接口账户、订单、服务和自动化中心。</span>
+                </div>
+                <div class="summary-strip">
+                  <div class="summary-pill"><span>自动化渠道</span><strong>{{ formatChannel(product.automationConfig.channel) }}</strong></div>
+                  <div class="summary-pill"><span>自动开通</span><strong>{{ product.automationConfig.autoProvision ? "已开启" : "人工处理" }}</strong></div>
+                  <div class="summary-pill"><span>上游策略</span><strong>{{ pricePolicyLabel(product.upstreamMapping.pricePolicy) }}</strong></div>
+                </div>
+                <div class="inline-actions" style="margin-top: 16px">
+                  <el-button plain :disabled="!product.automationConfig.providerAccountId" @click="openAutomationAccountWorkbench">
+                    自动化账户
+                  </el-button>
+                  <el-button plain :disabled="!product.upstreamMapping.providerAccountId" @click="openUpstreamAccountWorkbench">
+                    上游账户
+                  </el-button>
+                  <el-button plain @click="openProductOrdersWorkbench">订单列表</el-button>
+                  <el-button plain @click="openProductServicesWorkbench">服务列表</el-button>
+                  <el-button plain @click="openProductAutomationWorkbench">自动化任务</el-button>
+                  <el-button plain @click="openProductResourcesWorkbench">渠道资源</el-button>
+                </div>
               </div>
             </div>
           </el-tab-pane>
@@ -883,6 +1017,24 @@ onMounted(async () => {
               </div>
             </div>
 
+            <div v-if="remoteTemplate" class="panel-card" style="margin-top: 16px">
+              <div class="section-card__head">
+                <strong>差异处理动作</strong>
+                <span class="section-card__meta">先把上游模板回填到当前草稿，再决定是否保存到正式商品。</span>
+              </div>
+              <div class="summary-strip">
+                <div class="summary-pill"><span>价格差异</span><strong>{{ pricingDiffRows.length }}</strong></div>
+                <div class="summary-pill"><span>配置差异</span><strong>{{ configDiffRows.length }}</strong></div>
+                <div class="summary-pill"><span>模板差异</span><strong>{{ templateDiffRows.length }}</strong></div>
+              </div>
+              <div class="inline-actions" style="margin-top: 16px">
+                <el-button plain @click="applyRemotePricing">回填价格</el-button>
+                <el-button plain @click="applyRemoteConfigOptions">回填配置项</el-button>
+                <el-button plain @click="applyRemoteResourceTemplate">回填云模板</el-button>
+                <el-button type="primary" plain @click="applyRemoteAll">全部回填</el-button>
+                <el-button type="primary" :loading="saving" @click="handleSave">保存商品</el-button>
+              </div>
+            </div>
             <div class="portal-grid portal-grid--three" style="margin-top: 16px">
               <div class="panel-card">
                 <div class="section-card__head"><strong>价格差异</strong></div>

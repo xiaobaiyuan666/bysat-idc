@@ -164,6 +164,44 @@ ON DUPLICATE KEY UPDATE config_value = VALUES(config_value), updated_at = NOW()`
 	return normalized, nil
 }
 
+func (service *Service) GetSystemConfig(key, fallback string) string {
+	if service == nil || service.db == nil {
+		return fallback
+	}
+
+	var value string
+	err := service.db.QueryRow(`
+SELECT config_value
+FROM system_configs
+WHERE config_key = ?
+LIMIT 1`, strings.TrimSpace(key)).Scan(&value)
+	if err != nil {
+		return fallback
+	}
+
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func (service *Service) SaveSystemConfig(key, value, description string) error {
+	if service == nil || service.db == nil {
+		return nil
+	}
+
+	_, err := service.db.Exec(`
+INSERT INTO system_configs (config_key, config_value, description)
+VALUES (?, ?, ?)
+ON DUPLICATE KEY UPDATE config_value = VALUES(config_value), description = VALUES(description), updated_at = NOW()`,
+		strings.TrimSpace(key),
+		value,
+		valueOrFallback(description, "system config"),
+	)
+	return err
+}
+
 func (service *Service) Start(request StartTaskRequest) domain.Task {
 	if service == nil || service.repository == nil {
 		return domain.Task{}
@@ -331,6 +369,14 @@ func parseInt(value string, fallback int) int {
 }
 
 func parseString(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func valueOrFallback(value, fallback string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return fallback

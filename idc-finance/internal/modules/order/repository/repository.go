@@ -10,6 +10,13 @@ type Repository interface {
 	ListInvoicesByCustomer(customerID int64) []domain.Invoice
 	ListInvoicesByOrder(orderID int64) []domain.Invoice
 	GetInvoiceByID(id int64) (domain.Invoice, bool)
+	GetCustomerWallet(customerID int64) (domain.CustomerWallet, bool)
+	ListAccountTransactions(filter domain.AccountTransactionFilter) ([]domain.AccountTransaction, int)
+	ListAccountTransactionsByCustomer(customerID int64, limit int) []domain.AccountTransaction
+	ListPayments(filter domain.PaymentListFilter) ([]domain.PaymentRecord, int)
+	ListRefunds(filter domain.RefundListFilter) ([]domain.RefundRecord, int)
+	ListServiceChangeOrders(filter domain.ServiceChangeOrderListFilter) ([]domain.ServiceChangeOrder, int)
+	AdjustCustomerWallet(customerID int64, input domain.WalletAdjustment) (domain.CustomerWallet, domain.AccountTransaction, bool, error)
 	GetServiceChangeOrderByInvoiceID(invoiceID int64) (domain.ServiceChangeOrder, bool)
 	GetServiceChangeOrderByOrderID(orderID int64) (domain.ServiceChangeOrder, bool)
 	ListServiceChangeOrdersByService(serviceID int64) []domain.ServiceChangeOrder

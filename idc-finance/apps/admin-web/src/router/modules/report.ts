@@ -4,7 +4,7 @@ export default {
   path: "/reports",
   redirect: "/reports/overview",
   meta: {
-    title: "功能",
+    title: "\u62a5\u8868\u4e2d\u5fc3",
     titleEn: "Reports",
     requiresAuth: true
   },
@@ -13,7 +13,7 @@ export default {
       path: "overview",
       name: "report-overview",
       component: () => import("@/views/report/index.vue"),
-      meta: { title: "统计报表", titleEn: "Reports", requiresAuth: true }
+      meta: { title: "\u8fd0\u8425\u62a5\u8868", titleEn: "Operations Reports", requiresAuth: true }
     }
   ]
 } satisfies RouteRecordRaw;

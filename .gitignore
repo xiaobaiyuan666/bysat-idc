@@ -61,3 +61,5 @@ idc-finance/apps/admin-web/src/**/*.js
 idc-finance/apps/admin-web/src/**/*.js.map
 idc-finance/apps/portal-web/src/**/*.js
 idc-finance/apps/portal-web/src/**/*.js.map
+idc-finance/.runtime/
+idc-finance/data/*.json

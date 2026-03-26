@@ -2,9 +2,9 @@ import { defineStore } from "pinia";
 
 export const useSettingsStore = defineStore("settings", {
   state: () => ({
-    title: "IDC 财务后台",
-    titleEn: "IDC Finance Admin",
-    subtitle: "公有云业务与财务运营中心",
-    subtitleEn: "Public cloud operations and finance control center"
+    title: "白猿科技云业务运营后台",
+    titleEn: "BYSAT Cloud Operations Admin",
+    subtitle: "江苏白猿网络科技有限公司 · 猿创软件业务组",
+    subtitleEn: "Jiangsu Baiyuan Network Technology Co., Ltd. · Yuanchuang Software Business Group"
   })
 });

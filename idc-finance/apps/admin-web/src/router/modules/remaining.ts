@@ -5,7 +5,7 @@ const routes: RouteRecordRaw[] = [
     path: "/login",
     name: "login",
     component: () => import("@/views/login/index.vue"),
-    meta: { title: "登录", titleEn: "Login" }
+    meta: { title: "\u767b\u5f55", titleEn: "Login" }
   },
   {
     path: "/vnc",

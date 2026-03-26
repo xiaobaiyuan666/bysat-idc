@@ -95,6 +95,53 @@ export interface AuditLog {
   payload?: Record<string, unknown>;
 }
 
+export interface AdminMember {
+  id: number;
+  username: string;
+  displayName: string;
+  email: string;
+  mobile: string;
+  status: string;
+  roleIds: number[];
+  roles: string[];
+  roleNames: string[];
+  lastLoginAt: string;
+  lastLoginIp: string;
+  remarks: string;
+}
+
+export interface RoleRecord {
+  id: number;
+  name: string;
+  code: string;
+  description: string;
+  status: string;
+  menuIds: number[];
+  permissions: string[];
+  users: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveAdminRequest {
+  username: string;
+  displayName: string;
+  email?: string;
+  mobile?: string;
+  status: string;
+  roleIds: number[];
+  remarks?: string;
+}
+
+export interface SaveRoleRequest {
+  name: string;
+  code: string;
+  description?: string;
+  status: string;
+  menuIds: number[];
+  permissions: string[];
+}
+
 export interface ProductPriceOption {
   cycleCode: string;
   cycleName: string;
@@ -224,6 +271,45 @@ export interface InvoiceQuery {
   uid?: number | string;
 }
 
+export interface PaymentQuery {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: string;
+  customerId?: number | string;
+  uid?: number | string;
+  invoiceId?: number | string;
+  keyword?: string;
+  channel?: string;
+  status?: string;
+}
+
+export interface RefundQuery {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: string;
+  customerId?: number | string;
+  uid?: number | string;
+  invoiceId?: number | string;
+  keyword?: string;
+  status?: string;
+}
+
+export interface AccountTransactionQuery {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: string;
+  customerId?: number | string;
+  transactionType?: string;
+  direction?: string;
+  channel?: string;
+  keyword?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
 export interface ServiceQuery {
   page?: number;
   limit?: number;
@@ -234,6 +320,31 @@ export interface ServiceQuery {
   provider_account_id?: number | string;
   sync_status?: string;
   keyword?: string;
+}
+
+export interface ServiceChangeOrderQuery {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: string;
+  status?: string;
+  serviceId?: number | string;
+  orderId?: number | string;
+  invoiceId?: number | string;
+  action?: string;
+  keyword?: string;
+}
+
+export interface TicketQuery {
+  page?: number;
+  limit?: number;
+  keyword?: string;
+  status?: string;
+  priority?: string;
+  customerId?: number | string;
+  serviceId?: number | string;
+  departmentName?: string;
+  assignedAdminId?: number | string;
 }
 
 export interface ServiceRecord {
@@ -297,6 +408,65 @@ export interface RefundRecord {
   createdAt: string;
 }
 
+export interface CustomerWallet {
+  customerId: number;
+  customerNo: string;
+  customerName: string;
+  balance: number;
+  creditLimit: number;
+  creditUsed: number;
+  availableCredit: number;
+  updatedAt: string;
+}
+
+export interface AccountTransactionRecord {
+  id: number;
+  transactionNo: string;
+  customerId: number;
+  customerNo: string;
+  customerName: string;
+  orderId: number;
+  orderNo: string;
+  invoiceId: number;
+  invoiceNo: string;
+  paymentId: number;
+  paymentNo: string;
+  refundId: number;
+  refundNo: string;
+  transactionType: string;
+  direction: string;
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  creditBefore: number;
+  creditAfter: number;
+  channel: string;
+  summary: string;
+  remark: string;
+  operatorType: string;
+  operatorId: number;
+  operatorName: string;
+  occurredAt: string;
+}
+
+export interface CustomerWalletResponse {
+  wallet: CustomerWallet;
+  transactions: AccountTransactionRecord[];
+}
+
+export interface AdjustWalletRequest {
+  target: string;
+  operation: string;
+  amount: number;
+  summary?: string;
+  remark?: string;
+}
+
+export interface AdjustWalletResponse {
+  wallet: CustomerWallet;
+  transaction: AccountTransactionRecord;
+}
+
 export interface PaymentRecord {
   id: number;
   paymentNo: string;
@@ -310,6 +480,158 @@ export interface PaymentRecord {
   status: string;
   operator: string;
   paidAt: string;
+}
+
+export interface TicketRecord {
+  id: number;
+  ticketNo: string;
+  customerId: number;
+  customerNo: string;
+  customerName: string;
+  serviceId: number;
+  serviceNo: string;
+  productName: string;
+  title: string;
+  content: string;
+  status: string;
+  priority: string;
+  source: string;
+  departmentName: string;
+  assignedAdminId: number;
+  assignedAdminName: string;
+  latestReplyExcerpt: string;
+  lastReplyAt: string;
+  closedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  slaStatus: string;
+  slaDeadlineAt: string;
+  slaRemainingMins: number;
+  slaPaused: boolean;
+  autoCloseAt: string;
+  autoCloseMins: number;
+}
+
+export interface TicketPresetReply {
+  key: string;
+  title: string;
+  content: string;
+  departmentName: string;
+  status: string;
+}
+
+export interface TicketDepartment {
+  key: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  isDefault: boolean;
+  sort: number;
+  adminIds: number[];
+}
+
+export interface TicketSummaryStats {
+  total: number;
+  unassigned: number;
+  waitingCustomer: number;
+  breached: number;
+  closed: number;
+}
+
+export interface TicketDepartmentStats {
+  key: string;
+  name: string;
+  total: number;
+  open: number;
+  processing: number;
+  waitingCustomer: number;
+  closed: number;
+  breached: number;
+}
+
+export interface TicketAdminStats {
+  adminId: number;
+  adminName: string;
+  total: number;
+  open: number;
+  processing: number;
+  waitingCustomer: number;
+  closed: number;
+  breached: number;
+}
+
+export interface TicketStatisticsResponse {
+  summary: TicketSummaryStats;
+  departmentStats: TicketDepartmentStats[];
+  adminStats: TicketAdminStats[];
+}
+
+export interface TicketAutoCloseSweepItem {
+  ticketId: number;
+  ticketNo: string;
+  customerName: string;
+  departmentName: string;
+  autoCloseAt: string;
+  closedAt: string;
+  result: string;
+  message: string;
+}
+
+export interface TicketAutoCloseSweepResponse {
+  enabled: boolean;
+  autoCloseHours: number;
+  checkedCount: number;
+  skippedCount: number;
+  closedCount: number;
+  failedCount: number;
+  taskId: number;
+  taskNo: string;
+  message: string;
+  items: TicketAutoCloseSweepItem[];
+}
+
+export interface TicketReplyRecord {
+  id: number;
+  ticketId: number;
+  authorType: string;
+  authorId: number;
+  authorName: string;
+  content: string;
+  isInternal: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TicketDetailResponse {
+  ticket: TicketRecord;
+  replies: TicketReplyRecord[];
+  auditLogs: AuditLog[];
+}
+
+export interface UpdateTicketRequest {
+  title?: string;
+  status?: string;
+  priority?: string;
+  departmentName?: string;
+  assignedAdminId?: number;
+  assignedAdminName?: string;
+}
+
+export interface CreateAdminTicketRequest {
+  customerId: number;
+  serviceId?: number;
+  title: string;
+  content: string;
+  priority?: string;
+  departmentName?: string;
+  assignedAdminId?: number;
+  assignedAdminName?: string;
+}
+
+export interface ReplyTicketRequest {
+  content: string;
+  status?: string;
+  isInternal?: boolean;
 }
 
 export interface InvoiceRecord {
@@ -355,10 +677,13 @@ export interface ServiceDetailResponse {
 export interface ServiceChangeOrderRecord {
   id: number;
   serviceId: number;
+  serviceNo: string;
   orderId: number;
   orderNo: string;
   invoiceId: number;
   invoiceNo: string;
+  productName: string;
+  providerType: string;
   actionName: string;
   title: string;
   amount: number;
@@ -701,6 +1026,7 @@ export interface ImportUpstreamProductsRequest {
   autoSyncPricing: boolean;
   autoSyncConfig: boolean;
   autoSyncTemplate: boolean;
+  deactivateMissing?: boolean;
 }
 
 export interface ImportUpstreamProductResult {
@@ -716,16 +1042,60 @@ export interface ImportUpstreamProductResult {
 
 export interface ImportUpstreamProductsResponse {
   providerAccountId: number;
+  historyId?: string;
   items: ImportUpstreamProductResult[];
   importedCount?: number;
   updatedCount?: number;
   failedCount?: number;
+  deactivatedCount?: number;
   total: number;
   created: number;
   updated: number;
   skipped: number;
   failed: number;
   message: string;
+}
+
+export interface UpstreamImportHistoryQuery {
+  providerAccountId?: number | string;
+  providerType?: string;
+  status?: string;
+  keyword?: string;
+  limit?: number;
+}
+
+export interface UpstreamImportHistoryRecord {
+  historyId: string;
+  providerAccountId: number;
+  providerType: string;
+  accountName: string;
+  sourceName: string;
+  status: string;
+  message: string;
+  importAll: boolean;
+  autoSyncPricing: boolean;
+  autoSyncConfig: boolean;
+  autoSyncTemplate: boolean;
+  deactivateMissing: boolean;
+  requestedCodes: string[];
+  created: number;
+  updated: number;
+  deactivated: number;
+  failed: number;
+  total: number;
+  createdAt: string;
+  finishedAt: string;
+  durationMs: number;
+}
+
+export interface UpstreamImportHistoryDetail {
+  record: UpstreamImportHistoryRecord;
+  items: ImportUpstreamProductResult[];
+}
+
+export interface UpstreamImportHistoryListResponse {
+  items: UpstreamImportHistoryRecord[];
+  total: number;
 }
 
 export interface UpstreamCyclePrice {
@@ -1061,6 +1431,16 @@ export async function importUpstreamProducts(payload: ImportUpstreamProductsRequ
   return data.data as ImportUpstreamProductsResponse;
 }
 
+export async function fetchUpstreamImportHistory(params?: UpstreamImportHistoryQuery) {
+  const { data } = await http.get("/products/import-upstream/history", { params });
+  return data.data as UpstreamImportHistoryListResponse;
+}
+
+export async function fetchUpstreamImportHistoryDetail(id: string) {
+  const { data } = await http.get(`/products/import-upstream/history/${id}`);
+  return data.data as UpstreamImportHistoryDetail;
+}
+
 export async function fetchOrders(params?: OrderQuery) {
   const { data } = await http.get("/orders", { params });
   return data.data as { items: OrderRecord[]; total: number };
@@ -1091,6 +1471,16 @@ export async function updateUnpaidInvoice(id: number | string, payload: UpdateUn
   return data.data as InvoiceDetailResponse;
 }
 
+export async function fetchPayments(params?: PaymentQuery) {
+  const { data } = await http.get("/payments", { params });
+  return data.data as { items: PaymentRecord[]; total: number };
+}
+
+export async function fetchRefunds(params?: RefundQuery) {
+  const { data } = await http.get("/refunds", { params });
+  return data.data as { items: RefundRecord[]; total: number };
+}
+
 export async function receiveInvoicePayment(
   id: number | string,
   payload?: { channel?: string; tradeNo?: string }
@@ -1104,9 +1494,90 @@ export async function refundInvoice(id: number | string, reason: string) {
   return data.data as RefundInvoiceResponse;
 }
 
+export async function fetchAccountTransactions(params?: AccountTransactionQuery) {
+  const { data } = await http.get("/accounts/transactions", { params });
+  return data.data as { items: AccountTransactionRecord[]; total: number };
+}
+
+export async function fetchCustomerWallet(id: number | string) {
+  const { data } = await http.get(`/accounts/customers/${id}/wallet`);
+  return data.data as CustomerWalletResponse;
+}
+
+export async function adjustCustomerWallet(id: number | string, payload: AdjustWalletRequest) {
+  const { data } = await http.post(`/accounts/customers/${id}/adjustments`, payload);
+  return data.data as AdjustWalletResponse;
+}
+
 export async function fetchServices(params?: ServiceQuery) {
   const { data } = await http.get("/services", { params });
   return data.data as { items: ServiceRecord[]; total: number };
+}
+
+export async function fetchServiceChangeOrders(params?: ServiceChangeOrderQuery) {
+  const { data } = await http.get("/service-change-orders", { params });
+  return data.data as { items: ServiceChangeOrderRecord[]; total: number };
+}
+
+export async function fetchTickets(params?: TicketQuery) {
+  const { data } = await http.get("/tickets", { params });
+  return data.data as { items: TicketRecord[]; total: number };
+}
+
+export async function fetchTicketDetail(id: number | string) {
+  const { data } = await http.get(`/tickets/${id}`);
+  return data.data as TicketDetailResponse;
+}
+
+export async function createTicket(payload: CreateAdminTicketRequest) {
+  const { data } = await http.post("/tickets", payload);
+  return data.data as TicketRecord;
+}
+
+export async function fetchTicketPresets(departmentName?: string) {
+  const query = departmentName ? `?departmentName=${encodeURIComponent(departmentName)}` : "";
+  const { data } = await http.get(`/tickets/presets${query}`);
+  return data.data as { items: TicketPresetReply[]; total: number };
+}
+
+export async function fetchTicketDepartments() {
+  const { data } = await http.get("/tickets/departments");
+  return data.data as { items: TicketDepartment[]; total: number };
+}
+
+export async function updateTicketDepartments(items: TicketDepartment[]) {
+  const { data } = await http.put("/tickets/departments", { items });
+  return data.data as { items: TicketDepartment[]; total: number };
+}
+
+export async function fetchTicketStatistics() {
+  const { data } = await http.get("/tickets/statistics");
+  return data.data as TicketStatisticsResponse;
+}
+
+export async function updateTicketPresets(items: TicketPresetReply[]) {
+  const { data } = await http.put("/tickets/presets", { items });
+  return data.data as { items: TicketPresetReply[]; total: number };
+}
+
+export async function runTicketAutoCloseSweep() {
+  const { data } = await http.post("/tickets/auto-close/run");
+  return data.data as TicketAutoCloseSweepResponse;
+}
+
+export async function updateTicketRecord(id: number | string, payload: UpdateTicketRequest) {
+  const { data } = await http.patch(`/tickets/${id}`, payload);
+  return data.data as TicketRecord;
+}
+
+export async function claimTicket(id: number | string) {
+  const { data } = await http.post(`/tickets/${id}/claim`);
+  return data.data as TicketRecord;
+}
+
+export async function replyTicket(id: number | string, payload: ReplyTicketRequest) {
+  const { data } = await http.post(`/tickets/${id}/replies`, payload);
+  return data.data as TicketDetailResponse;
 }
 
 export async function fetchServiceDetail(id: number | string) {
@@ -1321,24 +1792,33 @@ export async function runServiceAction(
 }
 
 export async function fetchAdmins() {
-  const { data } = await http.get("/admins");
-  return data.data as Array<{
-    id: number;
-    username: string;
-    displayName: string;
-    status: string;
-    roles: string[];
-  }>;
+  const { data } = await http.get("/admin-members");
+  return data.data as AdminMember[];
+}
+
+export async function createAdmin(payload: SaveAdminRequest) {
+  const { data } = await http.post("/admin-members", payload);
+  return data.data as AdminMember;
+}
+
+export async function updateAdmin(id: number | string, payload: SaveAdminRequest) {
+  const { data } = await http.patch(`/admin-members/${id}`, payload);
+  return data.data as AdminMember;
 }
 
 export async function fetchRoles() {
   const { data } = await http.get("/roles");
-  return data.data as Array<{
-    id: number;
-    name: string;
-    code: string;
-    users: number;
-  }>;
+  return data.data as RoleRecord[];
+}
+
+export async function createRole(payload: SaveRoleRequest) {
+  const { data } = await http.post("/roles", payload);
+  return data.data as RoleRecord;
+}
+
+export async function updateRole(id: number | string, payload: SaveRoleRequest) {
+  const { data } = await http.patch(`/roles/${id}`, payload);
+  return data.data as RoleRecord;
 }
 
 export async function fetchAuditLogs() {

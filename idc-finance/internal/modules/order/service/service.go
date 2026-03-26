@@ -141,6 +141,102 @@ func (service *Service) ListInvoicesByCustomer(customerID int64) []domain.Invoic
 	return service.repository.ListInvoicesByCustomer(customerID)
 }
 
+func (service *Service) GetCustomerWallet(customerID int64) (domain.CustomerWallet, bool) {
+	return service.repository.GetCustomerWallet(customerID)
+}
+
+func (service *Service) ListAccountTransactions(filter domain.AccountTransactionFilter) ([]domain.AccountTransaction, int) {
+	return service.repository.ListAccountTransactions(filter)
+}
+
+func (service *Service) ListAccountTransactionsByCustomer(customerID int64, limit int) []domain.AccountTransaction {
+	return service.repository.ListAccountTransactionsByCustomer(customerID, limit)
+}
+
+func (service *Service) ListPayments(filter domain.PaymentListFilter) ([]domain.PaymentRecord, int) {
+	return service.repository.ListPayments(filter)
+}
+
+func (service *Service) ListRefunds(filter domain.RefundListFilter) ([]domain.RefundRecord, int) {
+	return service.repository.ListRefunds(filter)
+}
+
+func (service *Service) ListServiceChangeOrders(filter domain.ServiceChangeOrderListFilter) ([]dto.ServiceChangeOrderRecord, int) {
+	items, total := service.repository.ListServiceChangeOrders(filter)
+	return service.buildChangeOrderRecords(items), total
+}
+
+func (service *Service) GetCustomerWalletOverview(customerID int64, limit int) (dto.CustomerWalletResponse, bool) {
+	wallet, ok := service.repository.GetCustomerWallet(customerID)
+	if !ok {
+		return dto.CustomerWalletResponse{}, false
+	}
+	return dto.CustomerWalletResponse{
+		Wallet:       wallet,
+		Transactions: service.repository.ListAccountTransactionsByCustomer(customerID, limit),
+	}, true
+}
+
+func (service *Service) AdjustCustomerWallet(
+	customerID int64,
+	request dto.AdjustWalletRequest,
+	adminID int64,
+	adminName,
+	requestID string,
+) (dto.AdjustWalletResponse, bool, error) {
+	if request.Amount < 0 {
+		return dto.AdjustWalletResponse{}, false, fmt.Errorf("adjust amount cannot be negative")
+	}
+
+	wallet, transaction, ok, err := service.repository.AdjustCustomerWallet(customerID, domain.WalletAdjustment{
+		Target:       request.Target,
+		Operation:    request.Operation,
+		Amount:       request.Amount,
+		Summary:      request.Summary,
+		Remark:       request.Remark,
+		OperatorType: "ADMIN",
+		OperatorID:   adminID,
+		OperatorName: adminName,
+	})
+	if err != nil {
+		return dto.AdjustWalletResponse{}, false, err
+	}
+	if !ok {
+		return dto.AdjustWalletResponse{}, false, nil
+	}
+
+	action := "finance.balance_adjust"
+	if strings.EqualFold(strings.TrimSpace(request.Target), "CREDIT_LIMIT") {
+		action = "finance.credit_limit_adjust"
+	}
+	service.audit.Record(audit.Entry{
+		ActorType:   "ADMIN",
+		ActorID:     adminID,
+		Actor:       adminName,
+		Action:      action,
+		TargetType:  "customer",
+		TargetID:    customerID,
+		Target:      wallet.CustomerNo,
+		RequestID:   requestID,
+		Description: "后台调整客户钱包额度",
+		Payload: map[string]any{
+			"target":        request.Target,
+			"operation":     request.Operation,
+			"amount":        request.Amount,
+			"transactionNo": transaction.TransactionNo,
+			"summary":       transaction.Summary,
+			"remark":        transaction.Remark,
+			"balanceAfter":  wallet.Balance,
+			"creditAfter":   wallet.CreditLimit,
+		},
+	})
+
+	return dto.AdjustWalletResponse{
+		Wallet:      wallet,
+		Transaction: transaction,
+	}, true, nil
+}
+
 func (service *Service) GetInvoiceDetail(invoiceID int64) (dto.InvoiceDetailResponse, bool) {
 	invoice, exists := service.repository.GetInvoiceByID(invoiceID)
 	if !exists {
@@ -669,8 +765,12 @@ func (service *Service) PayInvoice(customerID int64, customerName string, invoic
 		return domain.Invoice{}, nil, domain.PaymentRecord{}, false
 	}
 	beforeStatus := invoice.Status
+	paymentChannel := "ONLINE"
+	if wallet, ok := service.repository.GetCustomerWallet(customerID); ok && wallet.Balance+0.00001 >= invoice.TotalAmount {
+		paymentChannel = "BALANCE"
+	}
 
-	invoice, serviceRecord, payment, ok := service.repository.PayInvoice(invoiceID, "ONLINE", "PORTAL", customerName, "")
+	invoice, serviceRecord, payment, ok := service.repository.PayInvoice(invoiceID, paymentChannel, "PORTAL", customerName, "")
 	if !ok {
 		return domain.Invoice{}, nil, domain.PaymentRecord{}, false
 	}
@@ -688,6 +788,7 @@ func (service *Service) PayInvoice(customerID int64, customerName string, invoic
 		Payload: map[string]any{
 			"amount":    invoice.TotalAmount,
 			"paymentNo": payment.PaymentNo,
+			"channel":   payment.Channel,
 		},
 	})
 
@@ -741,12 +842,22 @@ func (service *Service) PayInvoice(customerID int64, customerName string, invoic
 	return invoice, serviceRecord, payment, true
 }
 
-func (service *Service) ReceiveInvoicePayment(invoiceID int64, request dto.ReceivePaymentRequest, adminID int64, adminName, requestID string) (domain.Invoice, *domain.ServiceRecord, domain.PaymentRecord, bool) {
+func (service *Service) ReceiveInvoicePayment(invoiceID int64, request dto.ReceivePaymentRequest, adminID int64, adminName, requestID string) (domain.Invoice, *domain.ServiceRecord, domain.PaymentRecord, bool, error) {
 	invoice, exists := service.repository.GetInvoiceByID(invoiceID)
 	if !exists {
-		return domain.Invoice{}, nil, domain.PaymentRecord{}, false
+		return domain.Invoice{}, nil, domain.PaymentRecord{}, false, nil
 	}
 	beforeStatus := invoice.Status
+	channel := strings.ToUpper(strings.TrimSpace(firstNonEmptyString(request.Channel, "OFFLINE")))
+	if channel == "BALANCE" {
+		wallet, ok := service.repository.GetCustomerWallet(invoice.CustomerID)
+		if !ok {
+			return domain.Invoice{}, nil, domain.PaymentRecord{}, false, fmt.Errorf("客户钱包不存在，无法使用余额抵扣")
+		}
+		if wallet.Balance+0.00001 < invoice.TotalAmount {
+			return domain.Invoice{}, nil, domain.PaymentRecord{}, false, fmt.Errorf("客户余额不足，无法使用余额抵扣")
+		}
+	}
 
 	taskID := service.startTask(automationService.StartTaskRequest{
 		TaskType:     "INVOICE_ACTION",
@@ -762,7 +873,7 @@ func (service *Service) ReceiveInvoicePayment(invoiceID int64, request dto.Recei
 		OperatorType: "ADMIN",
 		OperatorName: adminName,
 		RequestPayload: map[string]any{
-			"channel": request.Channel,
+			"channel": channel,
 			"tradeNo": request.TradeNo,
 		},
 		Message: "账单收款任务已启动",
@@ -770,7 +881,7 @@ func (service *Service) ReceiveInvoicePayment(invoiceID int64, request dto.Recei
 
 	invoice, serviceRecord, payment, ok := service.repository.PayInvoice(
 		invoiceID,
-		request.Channel,
+		channel,
 		"ADMIN",
 		adminName,
 		request.TradeNo,
@@ -778,9 +889,9 @@ func (service *Service) ReceiveInvoicePayment(invoiceID int64, request dto.Recei
 	if !ok {
 		service.failTask(taskID, "账单收款失败", map[string]any{
 			"invoiceId": invoiceID,
-			"channel":   request.Channel,
+			"channel":   channel,
 		})
-		return domain.Invoice{}, nil, domain.PaymentRecord{}, false
+		return domain.Invoice{}, nil, domain.PaymentRecord{}, false, fmt.Errorf("账单不存在或当前状态不可收款")
 	}
 
 	service.audit.Record(audit.Entry{
@@ -792,7 +903,7 @@ func (service *Service) ReceiveInvoicePayment(invoiceID int64, request dto.Recei
 		TargetID:    invoice.ID,
 		Target:      invoice.InvoiceNo,
 		RequestID:   requestID,
-		Description: "鍚庡彴鐧昏璐﹀崟鏀舵",
+		Description: "后台登记账单收款",
 		Payload: map[string]any{
 			"amount":     invoice.TotalAmount,
 			"customerId": invoice.CustomerID,
@@ -819,7 +930,7 @@ func (service *Service) ReceiveInvoicePayment(invoiceID int64, request dto.Recei
 					"changeAction":   changeOrder.ActionName,
 					"resourceAction": resourceAction,
 				})
-				return invoice, serviceRecord, payment, true
+				return invoice, serviceRecord, payment, true, nil
 			} else {
 				service.audit.Record(audit.Entry{
 					ActorType:   "ADMIN",
@@ -852,7 +963,7 @@ func (service *Service) ReceiveInvoicePayment(invoiceID int64, request dto.Recei
 					"changeAction":   changeOrder.ActionName,
 					"executionError": err.Error(),
 				})
-				return invoice, serviceRecord, payment, true
+				return invoice, serviceRecord, payment, true, nil
 			}
 		}
 		if order, exists := service.repository.GetOrderByID(invoice.OrderID); exists {
@@ -884,7 +995,7 @@ func (service *Service) ReceiveInvoicePayment(invoiceID int64, request dto.Recei
 		"invoiceStatus": invoice.Status,
 	})
 
-	return invoice, serviceRecord, payment, true
+	return invoice, serviceRecord, payment, true, nil
 }
 
 func (service *Service) RefundInvoice(invoiceID int64, reason string, adminID int64, adminName, requestID string) (domain.Invoice, *domain.ServiceRecord, domain.RefundRecord, bool) {
@@ -1056,8 +1167,16 @@ func (service *Service) buildChangeOrderRecord(item domain.ServiceChangeOrder, o
 		ExecutionMessage: "改配单尚未支付，资源动作不会自动下发。",
 	}
 
+	if serviceRecord, exists := service.repository.GetServiceByID(item.ServiceID); exists {
+		record.ServiceNo = serviceRecord.ServiceNo
+		record.ProductName = serviceRecord.ProductName
+		record.ProviderType = serviceRecord.ProviderType
+	}
 	if order, exists := service.repository.GetOrderByID(item.OrderID); exists {
 		record.OrderNo = order.OrderNo
+		if strings.TrimSpace(record.ProductName) == "" {
+			record.ProductName = order.ProductName
+		}
 	}
 	if invoice, exists := service.repository.GetInvoiceByID(item.InvoiceID); exists {
 		record.InvoiceNo = invoice.InvoiceNo
@@ -1262,7 +1381,7 @@ func buildSelectedConfiguration(product catalogDomain.Product, selectedOptions [
 			value = selectedValue
 		}
 		if item.Required && value == "" {
-			return nil, fmt.Errorf("閰嶇疆椤?%s 涓哄繀閫夐」", item.Name)
+			return nil, fmt.Errorf("配置项 %s 为必选项", item.Name)
 		}
 
 		label := value
@@ -1306,7 +1425,7 @@ func buildResourceSnapshot(product catalogDomain.Product, customerID int64, conf
 		Hostname:        fmt.Sprintf("c%d-%s", customerID, slugify(product.Name)),
 		OperatingSystem: template.OperatingSystem,
 		LoginUsername:   template.LoginUsername,
-		PasswordHint:    "鍒濆鍖栧瘑鐮佸凡涓嬪彂鍒扮珯鍐呬俊",
+		PasswordHint:    "初始密码已下发到站内信",
 		SecurityGroup:   template.SecurityGroup,
 		CPUCores:        template.CPUCores,
 		MemoryGB:        template.MemoryGB,
@@ -1679,17 +1798,17 @@ func slugify(value string) string {
 func serviceActionDescription(action string) string {
 	switch action {
 	case "activate":
-		return "鍚庡彴鎭㈠鏈嶅姟杩愯"
+		return "后台恢复服务运行"
 	case "suspend":
-		return "鍚庡彴鏆傚仠鏈嶅姟"
+		return "后台暂停服务"
 	case "terminate":
-		return "鍚庡彴缁堟鏈嶅姟"
+		return "后台终止服务"
 	case "reboot":
-		return "鍚庡彴鍙戣捣瀹炰緥閲嶅惎"
+		return "后台发起实例重启"
 	case "reset-password":
-		return "鍚庡彴閲嶇疆瀹炰緥瀵嗙爜"
+		return "后台重置实例密码"
 	case "reinstall":
-		return "鍚庡彴鍙戣捣瀹炰緥閲嶈"
+		return "后台发起实例重装"
 	default:
 		return "后台更新服务状态"
 	}

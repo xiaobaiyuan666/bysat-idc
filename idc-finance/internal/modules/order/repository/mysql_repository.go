@@ -89,6 +89,124 @@ func (repository *MySQLRepository) GetInvoiceByID(id int64) (domain.Invoice, boo
 	return item, true
 }
 
+func (repository *MySQLRepository) GetCustomerWallet(customerID int64) (domain.CustomerWallet, bool) {
+	item, err := repository.loadCustomerWallet(context.Background(), repository.db, customerID, false)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("order mysql get customer wallet failed: %v", err)
+		}
+		return domain.CustomerWallet{}, false
+	}
+	return item, true
+}
+
+func (repository *MySQLRepository) ListAccountTransactions(filter domain.AccountTransactionFilter) ([]domain.AccountTransaction, int) {
+	whereSQL, args := buildAccountTransactionFilterSQL(filter)
+
+	countQuery := `
+SELECT COUNT(*)
+FROM account_transactions at
+LEFT JOIN customers c ON c.id = at.customer_id
+LEFT JOIN orders o ON o.id = at.order_id
+LEFT JOIN invoices i ON i.id = at.invoice_id
+LEFT JOIN payments p ON p.id = at.payment_id
+LEFT JOIN refunds r ON r.id = at.refund_id` + whereSQL
+
+	var total int
+	if err := repository.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		log.Printf("order mysql count account transactions failed: %v", err)
+		return nil, 0
+	}
+
+	sortColumn := resolveAccountTransactionSortColumn(filter.Sort)
+	sortDirection := resolveSortDirection(filter.Order)
+	query := `
+SELECT at.id
+FROM account_transactions at
+LEFT JOIN customers c ON c.id = at.customer_id
+LEFT JOIN orders o ON o.id = at.order_id
+LEFT JOIN invoices i ON i.id = at.invoice_id
+LEFT JOIN payments p ON p.id = at.payment_id
+LEFT JOIN refunds r ON r.id = at.refund_id` + whereSQL + ` ORDER BY ` + sortColumn + ` ` + sortDirection + `, at.id DESC`
+
+	queryArgs := append([]any{}, args...)
+	if filter.Limit > 0 {
+		page := filter.Page
+		if page <= 0 {
+			page = 1
+		}
+		offset := (page - 1) * filter.Limit
+		query += ` LIMIT ? OFFSET ?`
+		queryArgs = append(queryArgs, filter.Limit, offset)
+	}
+
+	rows, err := repository.db.Query(query, queryArgs...)
+	if err != nil {
+		log.Printf("order mysql list account transactions failed: %v", err)
+		return nil, 0
+	}
+	defer rows.Close()
+
+	items := make([]domain.AccountTransaction, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			log.Printf("order mysql scan account transaction id failed: %v", err)
+			return items, total
+		}
+		item, loadErr := repository.loadAccountTransaction(context.Background(), repository.db, id)
+		if loadErr != nil {
+			log.Printf("order mysql load account transaction failed: %v", loadErr)
+			continue
+		}
+		items = append(items, item)
+	}
+
+	return items, total
+}
+
+func (repository *MySQLRepository) ListAccountTransactionsByCustomer(customerID int64, limit int) []domain.AccountTransaction {
+	items, _ := repository.ListAccountTransactions(domain.AccountTransactionFilter{
+		CustomerID: customerID,
+		Page:       1,
+		Limit:      limit,
+		Sort:       "occurred_at",
+		Order:      "desc",
+	})
+	return items
+}
+
+func (repository *MySQLRepository) AdjustCustomerWallet(
+	customerID int64,
+	input domain.WalletAdjustment,
+) (domain.CustomerWallet, domain.AccountTransaction, bool, error) {
+	ctx := context.Background()
+	tx, err := repository.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.CustomerWallet{}, domain.AccountTransaction{}, false, err
+	}
+	defer rollbackQuietly(tx)
+
+	wallet, err := repository.loadCustomerWallet(ctx, tx, customerID, true)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return domain.CustomerWallet{}, domain.AccountTransaction{}, false, nil
+		}
+		return domain.CustomerWallet{}, domain.AccountTransaction{}, false, err
+	}
+
+	transaction, updatedWallet, err := repository.applyWalletAdjustmentMySQL(ctx, tx, wallet, input, 0, "", 0, "", 0, "", 0, "")
+	if err != nil {
+		return domain.CustomerWallet{}, domain.AccountTransaction{}, false, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return domain.CustomerWallet{}, domain.AccountTransaction{}, false, err
+	}
+
+	return updatedWallet, transaction, true, nil
+}
+
 func (repository *MySQLRepository) GetServiceChangeOrderByInvoiceID(invoiceID int64) (domain.ServiceChangeOrder, bool) {
 	row := repository.db.QueryRow(`
 SELECT sco.id, sco.service_id, sco.order_id, sco.invoice_id, sco.action_name, sco.title, sco.amount, sco.status, sco.reason, sco.payload_json,
@@ -499,7 +617,7 @@ func (repository *MySQLRepository) UpdateUnpaidInvoice(
 	amount := invoice.TotalAmount
 	if update.Amount != nil {
 		if *update.Amount < 0 {
-			return domain.Invoice{}, nil, false, fmt.Errorf("???????? 0")
+			return domain.Invoice{}, nil, false, fmt.Errorf("调整金额不能小于 0")
 		}
 		amount = *update.Amount
 	}
@@ -508,7 +626,7 @@ func (repository *MySQLRepository) UpdateUnpaidInvoice(
 	if strings.TrimSpace(update.DueAt) != "" {
 		parsedDueAt, ok := parseMySQLEditableTime(strings.TrimSpace(update.DueAt))
 		if !ok {
-			return domain.Invoice{}, nil, false, fmt.Errorf("???????????")
+			return domain.Invoice{}, nil, false, fmt.Errorf("到期时间格式不正确")
 		}
 		dueAt = parsedDueAt
 	}
@@ -616,14 +734,14 @@ WHERE order_id = ?`,
 				case string(domain.InvoiceStatusPaid):
 					if previousStatus != string(domain.InvoiceStatusPaid) {
 						if _, ok := repository.loadLatestPayment(ctx, tx, invoice.ID); !ok {
-							if _, _, err := repository.insertPayment(ctx, tx, invoice, "MANUAL", "ADMIN", "??????", "", now); err != nil {
+							if _, _, err := repository.insertPayment(ctx, tx, invoice, "MANUAL", "ADMIN", "后台登记收款", "", now); err != nil {
 								return domain.Invoice{}, nil, false, err
 							}
 						}
 					}
 				case string(domain.InvoiceStatusRefunded):
 					if previousStatus != string(domain.InvoiceStatusRefunded) {
-						if _, _, err := repository.insertRefund(ctx, tx, invoice, "??????????"); err != nil {
+						if _, _, err := repository.insertRefund(ctx, tx, invoice, "后台手动退款"); err != nil {
 							return domain.Invoice{}, nil, false, err
 						}
 					}
@@ -648,7 +766,7 @@ WHERE id = ?`,
 				case string(domain.InvoiceStatusPaid):
 					if previousStatus != string(domain.InvoiceStatusPaid) {
 						if _, ok := repository.loadLatestPayment(ctx, tx, invoice.ID); !ok {
-							if _, _, err := repository.insertPayment(ctx, tx, invoice, "MANUAL", "ADMIN", "??????", "", now); err != nil {
+							if _, _, err := repository.insertPayment(ctx, tx, invoice, "MANUAL", "ADMIN", "后台登记收款", "", now); err != nil {
 								return domain.Invoice{}, nil, false, err
 							}
 						}
@@ -663,7 +781,7 @@ WHERE invoice_id = ? AND status <> ?`,
 						domain.ServiceStatusActive,
 						"manual-adjust",
 						"SUCCESS",
-						"????????????",
+						"后台手动标记已支付，服务已激活",
 						invoice.ID,
 						domain.ServiceStatusTerminated,
 					); err != nil {
@@ -677,7 +795,7 @@ WHERE invoice_id = ? AND status <> ?`,
 						domain.ServiceStatusSuspended,
 						"manual-adjust",
 						"SUCCESS",
-						"????????????",
+						"后台手动标记待支付，服务已暂停",
 						invoice.ID,
 						domain.ServiceStatusTerminated,
 					); err != nil {
@@ -685,7 +803,7 @@ WHERE invoice_id = ? AND status <> ?`,
 					}
 				case string(domain.InvoiceStatusRefunded):
 					if previousStatus != string(domain.InvoiceStatusRefunded) {
-						if _, _, err := repository.insertRefund(ctx, tx, invoice, "??????????"); err != nil {
+						if _, _, err := repository.insertRefund(ctx, tx, invoice, "后台手动退款"); err != nil {
 							return domain.Invoice{}, nil, false, err
 						}
 					}
@@ -696,7 +814,7 @@ WHERE invoice_id = ?`,
 						domain.ServiceStatusTerminated,
 						"refund-terminate",
 						"SUCCESS",
-						"????????????",
+						"后台手动退款，服务已终止",
 						invoice.ID,
 					); err != nil {
 						return domain.Invoice{}, nil, false, err
@@ -712,7 +830,7 @@ WHERE invoice_id = ?`,
 
 	updatedInvoice, ok := repository.GetInvoiceByID(invoice.ID)
 	if !ok {
-		return domain.Invoice{}, nil, false, fmt.Errorf("?????????")
+		return domain.Invoice{}, nil, false, fmt.Errorf("更新后的账单不存在")
 	}
 
 	if updatedInvoice.OrderID > 0 {
@@ -1071,6 +1189,70 @@ ORDER BY id DESC`, invoiceID)
 	return result
 }
 
+func (repository *MySQLRepository) ListPayments(filter domain.PaymentListFilter) ([]domain.PaymentRecord, int) {
+	whereSQL, args := buildPaymentFilterSQL(filter)
+
+	countQuery := `SELECT COUNT(*) FROM payments p` + whereSQL
+	var total int
+	if err := repository.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		log.Printf("order mysql count payments failed: %v", err)
+		return nil, 0
+	}
+
+	sortColumn := resolvePaymentSortColumn(filter.Sort)
+	sortDirection := resolveSortDirection(filter.Order)
+	query := `
+SELECT p.id, p.payment_no, p.invoice_id, p.order_id, p.customer_id, p.channel, p.trade_no, p.amount, p.source, p.status, p.operator_name,
+       DATE_FORMAT(p.paid_at, '%Y-%m-%d %H:%i:%s')
+FROM payments p` + whereSQL + ` ORDER BY ` + sortColumn + ` ` + sortDirection + `, p.id DESC`
+
+	queryArgs := append([]any{}, args...)
+	if filter.Limit > 0 {
+		page := filter.Page
+		if page <= 0 {
+			page = 1
+		}
+		offset := (page - 1) * filter.Limit
+		query += ` LIMIT ? OFFSET ?`
+		queryArgs = append(queryArgs, filter.Limit, offset)
+	}
+
+	rows, err := repository.db.Query(query, queryArgs...)
+	if err != nil {
+		log.Printf("order mysql list payments failed: %v", err)
+		return nil, 0
+	}
+	defer rows.Close()
+
+	result := make([]domain.PaymentRecord, 0)
+	for rows.Next() {
+		var (
+			item    domain.PaymentRecord
+			orderID sql.NullInt64
+		)
+		if err := rows.Scan(
+			&item.ID,
+			&item.PaymentNo,
+			&item.InvoiceID,
+			&orderID,
+			&item.CustomerID,
+			&item.Channel,
+			&item.TradeNo,
+			&item.Amount,
+			&item.Source,
+			&item.Status,
+			&item.Operator,
+			&item.PaidAt,
+		); err != nil {
+			log.Printf("order mysql scan payment failed: %v", err)
+			return result, total
+		}
+		assignNullInt64(&item.OrderID, orderID)
+		result = append(result, item)
+	}
+	return result, total
+}
+
 func (repository *MySQLRepository) ListRefundsByInvoice(invoiceID int64) []domain.RefundRecord {
 	rows, err := repository.db.Query(`
 SELECT id, refund_no, invoice_id, order_id, customer_id, amount, reason, status,
@@ -1108,6 +1290,149 @@ ORDER BY id DESC`, invoiceID)
 		result = append(result, item)
 	}
 	return result
+}
+
+func (repository *MySQLRepository) ListRefunds(filter domain.RefundListFilter) ([]domain.RefundRecord, int) {
+	whereSQL, args := buildRefundFilterSQL(filter)
+
+	countQuery := `SELECT COUNT(*) FROM refunds r` + whereSQL
+	var total int
+	if err := repository.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		log.Printf("order mysql count refunds failed: %v", err)
+		return nil, 0
+	}
+
+	sortColumn := resolveRefundSortColumn(filter.Sort)
+	sortDirection := resolveSortDirection(filter.Order)
+	query := `
+SELECT r.id, r.refund_no, r.invoice_id, r.order_id, r.customer_id, r.amount, r.reason, r.status,
+       DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s')
+FROM refunds r` + whereSQL + ` ORDER BY ` + sortColumn + ` ` + sortDirection + `, r.id DESC`
+
+	queryArgs := append([]any{}, args...)
+	if filter.Limit > 0 {
+		page := filter.Page
+		if page <= 0 {
+			page = 1
+		}
+		offset := (page - 1) * filter.Limit
+		query += ` LIMIT ? OFFSET ?`
+		queryArgs = append(queryArgs, filter.Limit, offset)
+	}
+
+	rows, err := repository.db.Query(query, queryArgs...)
+	if err != nil {
+		log.Printf("order mysql list refunds failed: %v", err)
+		return nil, 0
+	}
+	defer rows.Close()
+
+	result := make([]domain.RefundRecord, 0)
+	for rows.Next() {
+		var (
+			item    domain.RefundRecord
+			orderID sql.NullInt64
+		)
+		if err := rows.Scan(
+			&item.ID,
+			&item.RefundNo,
+			&item.InvoiceID,
+			&orderID,
+			&item.CustomerID,
+			&item.Amount,
+			&item.Reason,
+			&item.Status,
+			&item.CreatedAt,
+		); err != nil {
+			log.Printf("order mysql scan refund failed: %v", err)
+			return result, total
+		}
+		assignNullInt64(&item.OrderID, orderID)
+		result = append(result, item)
+	}
+	return result, total
+}
+
+func (repository *MySQLRepository) ListServiceChangeOrders(filter domain.ServiceChangeOrderListFilter) ([]domain.ServiceChangeOrder, int) {
+	whereSQL, args := buildServiceChangeOrderFilterSQL(filter)
+
+	countQuery := `SELECT COUNT(*) FROM service_change_orders sco
+LEFT JOIN orders o ON o.id = sco.order_id
+LEFT JOIN invoices i ON i.id = sco.invoice_id
+LEFT JOIN services s ON s.id = sco.service_id` + whereSQL
+	var total int
+	if err := repository.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		log.Printf("order mysql count service change orders failed: %v", err)
+		return nil, 0
+	}
+
+	sortColumn := resolveServiceChangeOrderSortColumn(filter.Sort)
+	sortDirection := resolveSortDirection(filter.Order)
+	query := `
+SELECT sco.id, sco.service_id, sco.order_id, sco.invoice_id, sco.action_name, sco.title, sco.amount, sco.status, sco.reason, sco.payload_json,
+       IFNULL(i.billing_cycle, ''),
+       IFNULL(DATE_FORMAT(sco.paid_at, '%Y-%m-%d %H:%i:%s'), ''),
+       IFNULL(DATE_FORMAT(sco.refunded_at, '%Y-%m-%d %H:%i:%s'), ''),
+       DATE_FORMAT(sco.created_at, '%Y-%m-%d %H:%i:%s'),
+       DATE_FORMAT(sco.updated_at, '%Y-%m-%d %H:%i:%s')
+FROM service_change_orders sco
+LEFT JOIN orders o ON o.id = sco.order_id
+LEFT JOIN invoices i ON i.id = sco.invoice_id
+LEFT JOIN services s ON s.id = sco.service_id` + whereSQL + ` ORDER BY ` + sortColumn + ` ` + sortDirection + `, sco.id DESC`
+
+	queryArgs := append([]any{}, args...)
+	if filter.Limit > 0 {
+		page := filter.Page
+		if page <= 0 {
+			page = 1
+		}
+		offset := (page - 1) * filter.Limit
+		query += ` LIMIT ? OFFSET ?`
+		queryArgs = append(queryArgs, filter.Limit, offset)
+	}
+
+	rows, err := repository.db.Query(query, queryArgs...)
+	if err != nil {
+		log.Printf("order mysql list service change orders failed: %v", err)
+		return nil, 0
+	}
+	defer rows.Close()
+
+	items := make([]domain.ServiceChangeOrder, 0)
+	for rows.Next() {
+		var (
+			item        domain.ServiceChangeOrder
+			payloadJSON sql.NullString
+		)
+		if err := rows.Scan(
+			&item.ID,
+			&item.ServiceID,
+			&item.OrderID,
+			&item.InvoiceID,
+			&item.ActionName,
+			&item.Title,
+			&item.Amount,
+			&item.Status,
+			&item.Reason,
+			&payloadJSON,
+			&item.BillingCycle,
+			&item.PaidAt,
+			&item.RefundedAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			log.Printf("order mysql scan service change order failed: %v", err)
+			return items, total
+		}
+		if payloadJSON.Valid && strings.TrimSpace(payloadJSON.String) != "" {
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(payloadJSON.String), &payload); err == nil {
+				item.Payload = payload
+			}
+		}
+		items = append(items, item)
+	}
+	return items, total
 }
 
 func (repository *MySQLRepository) Checkout(
@@ -1270,6 +1595,15 @@ func (repository *MySQLRepository) PayInvoice(invoiceID int64, channel, source, 
 	}
 
 	now := time.Now()
+	paymentChannel := strings.ToUpper(strings.TrimSpace(firstNonEmptyString(channel, "ONLINE")))
+	var wallet *domain.CustomerWallet
+	if paymentChannel == "BALANCE" {
+		item, walletErr := repository.loadCustomerWallet(ctx, tx, invoice.CustomerID, true)
+		if walletErr != nil || item.Balance+0.00001 < invoice.TotalAmount {
+			return domain.Invoice{}, nil, domain.PaymentRecord{}, false
+		}
+		wallet = &item
+	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE invoices
 SET status = ?, paid_at = ?, updated_at = NOW()
@@ -1282,10 +1616,24 @@ WHERE id = ?`,
 		return domain.Invoice{}, nil, domain.PaymentRecord{}, false
 	}
 
-	paymentNo, paymentID, err := repository.insertPayment(ctx, tx, invoice, channel, source, operator, tradeNo, now)
+	paymentNo, paymentID, err := repository.insertPayment(ctx, tx, invoice, paymentChannel, source, operator, tradeNo, now)
 	if err != nil {
 		log.Printf("order mysql insert payment failed: %v", err)
 		return domain.Invoice{}, nil, domain.PaymentRecord{}, false
+	}
+	if wallet != nil {
+		if _, _, err := repository.applyWalletAdjustmentMySQL(ctx, tx, *wallet, domain.WalletAdjustment{
+			Target:       "BALANCE",
+			Operation:    "DECREASE",
+			Amount:       invoice.TotalAmount,
+			Summary:      fmt.Sprintf("浣欓鏀粯璐﹀崟 %s", invoice.InvoiceNo),
+			Remark:       fmt.Sprintf("payment:%s", paymentNo),
+			OperatorType: source,
+			OperatorName: operator,
+		}, invoice.OrderID, invoice.OrderNo, invoice.ID, invoice.InvoiceNo, paymentID, paymentNo, 0, ""); err != nil {
+			log.Printf("order mysql apply wallet payment failed: %v", err)
+			return domain.Invoice{}, nil, domain.PaymentRecord{}, false
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -1509,6 +1857,15 @@ func (repository *MySQLRepository) RefundInvoice(invoiceID int64, reason string)
 	if invoice.Status != domain.InvoiceStatusPaid {
 		return domain.Invoice{}, nil, domain.RefundRecord{}, false
 	}
+	payment, hasPayment := repository.loadLatestPayment(ctx, tx, invoiceID)
+	var wallet *domain.CustomerWallet
+	if hasPayment && strings.EqualFold(payment.Channel, "BALANCE") {
+		item, walletErr := repository.loadCustomerWallet(ctx, tx, invoice.CustomerID, true)
+		if walletErr != nil {
+			return domain.Invoice{}, nil, domain.RefundRecord{}, false
+		}
+		wallet = &item
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE invoices
@@ -1527,6 +1884,20 @@ WHERE id = ?`,
 		return domain.Invoice{}, nil, domain.RefundRecord{}, false
 	}
 	_ = refundNo
+	if wallet != nil {
+		if _, _, err := repository.applyWalletAdjustmentMySQL(ctx, tx, *wallet, domain.WalletAdjustment{
+			Target:       "BALANCE",
+			Operation:    "INCREASE",
+			Amount:       invoice.TotalAmount,
+			Summary:      fmt.Sprintf("閫€娆惧洖閫€浣欓 %s", refundNo),
+			Remark:       reason,
+			OperatorType: "ADMIN",
+			OperatorName: "绯荤粺",
+		}, invoice.OrderID, invoice.OrderNo, invoice.ID, invoice.InvoiceNo, payment.ID, payment.PaymentNo, refundID, refundNo); err != nil {
+			log.Printf("order mysql apply wallet refund failed: %v", err)
+			return domain.Invoice{}, nil, domain.RefundRecord{}, false
+		}
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE orders
@@ -2121,6 +2492,288 @@ LIMIT 1`, invoiceID)
 	return item, true
 }
 
+func (repository *MySQLRepository) loadCustomerWallet(
+	ctx context.Context,
+	queryer queryer,
+	customerID int64,
+	forUpdate bool,
+) (domain.CustomerWallet, error) {
+	query := `
+SELECT c.id, c.customer_no, c.name,
+       CAST(c.balance AS DECIMAL(12,2)),
+       CAST(c.credit_limit AS DECIMAL(12,2)),
+       CAST(c.credit_used AS DECIMAL(12,2)),
+       IFNULL(DATE_FORMAT(c.updated_at, '%Y-%m-%d %H:%i:%s'), '')
+FROM customers c
+WHERE c.id = ?`
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+
+	row := queryer.QueryRowContext(ctx, query, customerID)
+	var item domain.CustomerWallet
+	if err := row.Scan(
+		&item.CustomerID,
+		&item.CustomerNo,
+		&item.CustomerName,
+		&item.Balance,
+		&item.CreditLimit,
+		&item.CreditUsed,
+		&item.UpdatedAt,
+	); err != nil {
+		return domain.CustomerWallet{}, err
+	}
+	item.AvailableCredit = item.CreditLimit - item.CreditUsed
+	return item, nil
+}
+
+func (repository *MySQLRepository) applyWalletAdjustmentMySQL(
+	ctx context.Context,
+	tx *sql.Tx,
+	wallet domain.CustomerWallet,
+	input domain.WalletAdjustment,
+	orderID int64,
+	orderNo string,
+	invoiceID int64,
+	invoiceNo string,
+	paymentID int64,
+	paymentNo string,
+	refundID int64,
+	refundNo string,
+) (domain.AccountTransaction, domain.CustomerWallet, error) {
+	target := strings.ToUpper(strings.TrimSpace(input.Target))
+	operation := strings.ToUpper(strings.TrimSpace(input.Operation))
+	if input.Amount < 0 {
+		return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("wallet amount cannot be negative")
+	}
+
+	transaction := domain.AccountTransaction{
+		CustomerID:   wallet.CustomerID,
+		CustomerNo:   wallet.CustomerNo,
+		CustomerName: wallet.CustomerName,
+		OrderID:      orderID,
+		OrderNo:      orderNo,
+		InvoiceID:    invoiceID,
+		InvoiceNo:    invoiceNo,
+		PaymentID:    paymentID,
+		PaymentNo:    paymentNo,
+		RefundID:     refundID,
+		RefundNo:     refundNo,
+		Channel:      firstNonEmptyString(strings.ToUpper(strings.TrimSpace(input.OperatorType)), "SYSTEM"),
+		Summary:      strings.TrimSpace(input.Summary),
+		Remark:       strings.TrimSpace(input.Remark),
+		OperatorType: firstNonEmptyString(strings.ToUpper(strings.TrimSpace(input.OperatorType)), "ADMIN"),
+		OperatorID:   input.OperatorID,
+		OperatorName: firstNonEmptyString(input.OperatorName, "System"),
+		OccurredAt:   time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	switch target {
+	case "BALANCE":
+		transaction.TransactionType = domain.AccountTransactionTypeAdjustment
+		transaction.BalanceBefore = wallet.Balance
+		transaction.BalanceAfter = wallet.Balance
+		transaction.CreditBefore = wallet.CreditLimit
+		transaction.CreditAfter = wallet.CreditLimit
+		switch operation {
+		case "INCREASE":
+			transaction.Direction = domain.AccountTransactionDirectionIn
+			transaction.BalanceAfter = wallet.Balance + input.Amount
+		case "DECREASE":
+			if wallet.Balance+0.00001 < input.Amount {
+				return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("wallet balance is insufficient")
+			}
+			transaction.Direction = domain.AccountTransactionDirectionOut
+			transaction.BalanceAfter = wallet.Balance - input.Amount
+		case "SET":
+			transaction.BalanceAfter = input.Amount
+			switch {
+			case transaction.BalanceAfter > transaction.BalanceBefore:
+				transaction.Direction = domain.AccountTransactionDirectionIn
+			case transaction.BalanceAfter < transaction.BalanceBefore:
+				transaction.Direction = domain.AccountTransactionDirectionOut
+			default:
+				transaction.Direction = domain.AccountTransactionDirectionFlat
+			}
+			input.Amount = absDecimal(transaction.BalanceAfter - transaction.BalanceBefore)
+		default:
+			return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("wallet operation is invalid")
+		}
+		transaction.Amount = input.Amount
+		if strings.TrimSpace(transaction.Summary) == "" {
+			transaction.Summary = "Balance adjustment"
+		}
+		wallet.Balance = transaction.BalanceAfter
+
+	case "CREDIT_LIMIT":
+		transaction.TransactionType = domain.AccountTransactionTypeCreditLimit
+		transaction.BalanceBefore = wallet.Balance
+		transaction.BalanceAfter = wallet.Balance
+		transaction.CreditBefore = wallet.CreditLimit
+		transaction.CreditAfter = wallet.CreditLimit
+		switch operation {
+		case "INCREASE":
+			transaction.Direction = domain.AccountTransactionDirectionIn
+			transaction.CreditAfter = wallet.CreditLimit + input.Amount
+		case "DECREASE":
+			if wallet.CreditLimit+0.00001 < input.Amount {
+				return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("credit limit is insufficient")
+			}
+			transaction.Direction = domain.AccountTransactionDirectionOut
+			transaction.CreditAfter = wallet.CreditLimit - input.Amount
+		case "SET":
+			transaction.CreditAfter = input.Amount
+			switch {
+			case transaction.CreditAfter > transaction.CreditBefore:
+				transaction.Direction = domain.AccountTransactionDirectionIn
+			case transaction.CreditAfter < transaction.CreditBefore:
+				transaction.Direction = domain.AccountTransactionDirectionOut
+			default:
+				transaction.Direction = domain.AccountTransactionDirectionFlat
+			}
+			input.Amount = absDecimal(transaction.CreditAfter - transaction.CreditBefore)
+		default:
+			return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("credit operation is invalid")
+		}
+		if transaction.CreditAfter+0.00001 < wallet.CreditUsed {
+			return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("credit limit cannot be lower than used credit")
+		}
+		transaction.Amount = input.Amount
+		if strings.TrimSpace(transaction.Summary) == "" {
+			transaction.Summary = "Credit limit adjustment"
+		}
+		wallet.CreditLimit = transaction.CreditAfter
+
+	default:
+		return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("wallet target is invalid")
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE customers
+SET balance = ?, credit_limit = ?, updated_at = NOW()
+WHERE id = ?`,
+		wallet.Balance,
+		wallet.CreditLimit,
+		wallet.CustomerID,
+	); err != nil {
+		return domain.AccountTransaction{}, domain.CustomerWallet{}, err
+	}
+
+	tempNo := fmt.Sprintf("TMP-ACT-%d", time.Now().UnixNano())
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO account_transactions (
+  transaction_no, customer_id, order_id, invoice_id, payment_id, refund_id,
+  transaction_type, direction, amount,
+  balance_before, balance_after, credit_before, credit_after,
+  channel, summary, remark, operator_type, operator_id, operator_name, occurred_at
+) VALUES (?, ?, NULLIF(?, 0), NULLIF(?, 0), NULLIF(?, 0), NULLIF(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tempNo,
+		wallet.CustomerID,
+		orderID,
+		invoiceID,
+		paymentID,
+		refundID,
+		transaction.TransactionType,
+		transaction.Direction,
+		transaction.Amount,
+		transaction.BalanceBefore,
+		transaction.BalanceAfter,
+		transaction.CreditBefore,
+		transaction.CreditAfter,
+		transaction.Channel,
+		transaction.Summary,
+		transaction.Remark,
+		transaction.OperatorType,
+		transaction.OperatorID,
+		transaction.OperatorName,
+		transaction.OccurredAt,
+	)
+	if err != nil {
+		return domain.AccountTransaction{}, domain.CustomerWallet{}, err
+	}
+
+	transactionID, err := result.LastInsertId()
+	if err != nil {
+		return domain.AccountTransaction{}, domain.CustomerWallet{}, err
+	}
+	transactionNo := fmt.Sprintf("ACT-%08d", transactionID)
+	if _, err := tx.ExecContext(ctx, `UPDATE account_transactions SET transaction_no = ? WHERE id = ?`, transactionNo, transactionID); err != nil {
+		return domain.AccountTransaction{}, domain.CustomerWallet{}, err
+	}
+
+	transaction.ID = transactionID
+	transaction.TransactionNo = transactionNo
+	wallet.AvailableCredit = wallet.CreditLimit - wallet.CreditUsed
+	wallet.UpdatedAt = transaction.OccurredAt
+	return transaction, wallet, nil
+}
+
+func (repository *MySQLRepository) loadAccountTransaction(ctx context.Context, queryer queryer, id int64) (domain.AccountTransaction, error) {
+	row := queryer.QueryRowContext(ctx, `
+SELECT at.id, at.transaction_no, at.customer_id,
+       IFNULL(c.customer_no, ''), IFNULL(c.name, ''),
+       at.order_id, IFNULL(o.order_no, ''),
+       at.invoice_id, IFNULL(i.invoice_no, ''),
+       at.payment_id, IFNULL(p.payment_no, ''),
+       at.refund_id, IFNULL(r.refund_no, ''),
+       at.transaction_type, at.direction, at.amount,
+       at.balance_before, at.balance_after, at.credit_before, at.credit_after,
+       at.channel, at.summary, IFNULL(at.remark, ''), at.operator_type, at.operator_id, at.operator_name,
+       DATE_FORMAT(at.occurred_at, '%Y-%m-%d %H:%i:%s')
+FROM account_transactions at
+LEFT JOIN customers c ON c.id = at.customer_id
+LEFT JOIN orders o ON o.id = at.order_id
+LEFT JOIN invoices i ON i.id = at.invoice_id
+LEFT JOIN payments p ON p.id = at.payment_id
+LEFT JOIN refunds r ON r.id = at.refund_id
+WHERE at.id = ?`, id)
+
+	var (
+		item      domain.AccountTransaction
+		orderID   sql.NullInt64
+		invoiceID sql.NullInt64
+		paymentID sql.NullInt64
+		refundID  sql.NullInt64
+	)
+	if err := row.Scan(
+		&item.ID,
+		&item.TransactionNo,
+		&item.CustomerID,
+		&item.CustomerNo,
+		&item.CustomerName,
+		&orderID,
+		&item.OrderNo,
+		&invoiceID,
+		&item.InvoiceNo,
+		&paymentID,
+		&item.PaymentNo,
+		&refundID,
+		&item.RefundNo,
+		&item.TransactionType,
+		&item.Direction,
+		&item.Amount,
+		&item.BalanceBefore,
+		&item.BalanceAfter,
+		&item.CreditBefore,
+		&item.CreditAfter,
+		&item.Channel,
+		&item.Summary,
+		&item.Remark,
+		&item.OperatorType,
+		&item.OperatorID,
+		&item.OperatorName,
+		&item.OccurredAt,
+	); err != nil {
+		return domain.AccountTransaction{}, err
+	}
+
+	assignNullInt64(&item.OrderID, orderID)
+	assignNullInt64(&item.InvoiceID, invoiceID)
+	assignNullInt64(&item.PaymentID, paymentID)
+	assignNullInt64(&item.RefundID, refundID)
+	return item, nil
+}
+
 func (repository *MySQLRepository) findServiceByInvoice(ctx context.Context, queryer queryer, invoiceID int64) (*domain.ServiceRecord, bool) {
 	row := queryer.QueryRowContext(ctx, `SELECT id FROM services WHERE invoice_id = ? ORDER BY id DESC LIMIT 1`, invoiceID)
 	var id int64
@@ -2552,6 +3205,154 @@ func buildServiceFilterSQL(filter domain.ServiceListFilter) (string, []any) {
 	return " WHERE " + strings.Join(conditions, " AND "), args
 }
 
+func buildAccountTransactionFilterSQL(filter domain.AccountTransactionFilter) (string, []any) {
+	conditions := []string{"1 = 1"}
+	args := make([]any, 0)
+
+	if filter.CustomerID > 0 {
+		conditions = append(conditions, "at.customer_id = ?")
+		args = append(args, filter.CustomerID)
+	}
+	if value := strings.TrimSpace(filter.TransactionType); value != "" {
+		tokens := make([]string, 0)
+		for _, item := range strings.Split(value, ",") {
+			token := strings.ToUpper(strings.TrimSpace(item))
+			if token == "" {
+				continue
+			}
+			tokens = append(tokens, token)
+		}
+		switch len(tokens) {
+		case 1:
+			conditions = append(conditions, "at.transaction_type = ?")
+			args = append(args, tokens[0])
+		default:
+			if len(tokens) > 1 {
+				placeholders := make([]string, len(tokens))
+				for index, token := range tokens {
+					placeholders[index] = "?"
+					args = append(args, token)
+				}
+				conditions = append(conditions, "at.transaction_type IN ("+strings.Join(placeholders, ", ")+")")
+			}
+		}
+	}
+	if value := strings.TrimSpace(filter.Direction); value != "" {
+		conditions = append(conditions, "at.direction = ?")
+		args = append(args, strings.ToUpper(value))
+	}
+	if value := strings.TrimSpace(filter.Channel); value != "" {
+		conditions = append(conditions, "at.channel = ?")
+		args = append(args, strings.ToUpper(value))
+	}
+	if value := strings.TrimSpace(filter.Keyword); value != "" {
+		pattern := "%" + value + "%"
+		conditions = append(conditions, `(at.transaction_no LIKE ? OR c.name LIKE ? OR at.summary LIKE ? OR IFNULL(i.invoice_no, '') LIKE ? OR IFNULL(o.order_no, '') LIKE ? OR IFNULL(p.payment_no, '') LIKE ? OR IFNULL(r.refund_no, '') LIKE ?)`)
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+	}
+	if value := strings.TrimSpace(filter.StartTime); value != "" {
+		if parsed, ok := parseMySQLFilterTime(value, false); ok {
+			conditions = append(conditions, "at.occurred_at >= ?")
+			args = append(args, parsed)
+		}
+	}
+	if value := strings.TrimSpace(filter.EndTime); value != "" {
+		if parsed, ok := parseMySQLFilterTime(value, true); ok {
+			conditions = append(conditions, "at.occurred_at <= ?")
+			args = append(args, parsed)
+		}
+	}
+
+	return " WHERE " + strings.Join(conditions, " AND "), args
+}
+
+func buildPaymentFilterSQL(filter domain.PaymentListFilter) (string, []any) {
+	conditions := []string{"1 = 1"}
+	args := make([]any, 0)
+
+	if filter.CustomerID > 0 {
+		conditions = append(conditions, "p.customer_id = ?")
+		args = append(args, filter.CustomerID)
+	}
+	if filter.InvoiceID > 0 {
+		conditions = append(conditions, "p.invoice_id = ?")
+		args = append(args, filter.InvoiceID)
+	}
+	if value := strings.TrimSpace(filter.Keyword); value != "" {
+		pattern := "%" + value + "%"
+		conditions = append(conditions, "(p.payment_no LIKE ? OR IFNULL(p.trade_no, '') LIKE ?)")
+		args = append(args, pattern, pattern)
+	}
+	if value := strings.TrimSpace(filter.Channel); value != "" {
+		conditions = append(conditions, "p.channel = ?")
+		args = append(args, strings.ToUpper(value))
+	}
+	if value := strings.TrimSpace(filter.Status); value != "" {
+		conditions = append(conditions, "p.status = ?")
+		args = append(args, strings.ToUpper(value))
+	}
+
+	return " WHERE " + strings.Join(conditions, " AND "), args
+}
+
+func buildRefundFilterSQL(filter domain.RefundListFilter) (string, []any) {
+	conditions := []string{"1 = 1"}
+	args := make([]any, 0)
+
+	if filter.CustomerID > 0 {
+		conditions = append(conditions, "r.customer_id = ?")
+		args = append(args, filter.CustomerID)
+	}
+	if filter.InvoiceID > 0 {
+		conditions = append(conditions, "r.invoice_id = ?")
+		args = append(args, filter.InvoiceID)
+	}
+	if value := strings.TrimSpace(filter.Keyword); value != "" {
+		pattern := "%" + value + "%"
+		conditions = append(conditions, "(r.refund_no LIKE ? OR IFNULL(r.reason, '') LIKE ?)")
+		args = append(args, pattern, pattern)
+	}
+	if value := strings.TrimSpace(filter.Status); value != "" {
+		conditions = append(conditions, "r.status = ?")
+		args = append(args, strings.ToUpper(value))
+	}
+
+	return " WHERE " + strings.Join(conditions, " AND "), args
+}
+
+func buildServiceChangeOrderFilterSQL(filter domain.ServiceChangeOrderListFilter) (string, []any) {
+	conditions := []string{"1 = 1"}
+	args := make([]any, 0)
+
+	if filter.ServiceID > 0 {
+		conditions = append(conditions, "sco.service_id = ?")
+		args = append(args, filter.ServiceID)
+	}
+	if filter.OrderID > 0 {
+		conditions = append(conditions, "sco.order_id = ?")
+		args = append(args, filter.OrderID)
+	}
+	if filter.InvoiceID > 0 {
+		conditions = append(conditions, "sco.invoice_id = ?")
+		args = append(args, filter.InvoiceID)
+	}
+	if value := strings.TrimSpace(filter.Status); value != "" {
+		conditions = append(conditions, "sco.status = ?")
+		args = append(args, strings.ToUpper(value))
+	}
+	if value := strings.TrimSpace(filter.Action); value != "" {
+		conditions = append(conditions, "sco.action_name = ?")
+		args = append(args, value)
+	}
+	if value := strings.TrimSpace(filter.Keyword); value != "" {
+		pattern := "%" + value + "%"
+		conditions = append(conditions, "(sco.title LIKE ? OR sco.action_name LIKE ? OR IFNULL(sco.reason, '') LIKE ? OR IFNULL(o.order_no, '') LIKE ? OR IFNULL(i.invoice_no, '') LIKE ? OR IFNULL(s.service_no, '') LIKE ?)")
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern)
+	}
+
+	return " WHERE " + strings.Join(conditions, " AND "), args
+}
+
 func resolveOrderSortColumn(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "amount":
@@ -2590,6 +3391,54 @@ func resolveServiceSortColumn(value string) string {
 		return "s.last_sync_at"
 	default:
 		return "s.created_at"
+	}
+}
+
+func resolveAccountTransactionSortColumn(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "amount":
+		return "at.amount"
+	case "transaction_no":
+		return "at.transaction_no"
+	default:
+		return "at.occurred_at"
+	}
+}
+
+func resolvePaymentSortColumn(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "amount":
+		return "p.amount"
+	case "payment_no":
+		return "p.payment_no"
+	default:
+		return "p.paid_at"
+	}
+}
+
+func resolveRefundSortColumn(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "amount":
+		return "r.amount"
+	case "refund_no":
+		return "r.refund_no"
+	default:
+		return "r.created_at"
+	}
+}
+
+func resolveServiceChangeOrderSortColumn(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "amount":
+		return "sco.amount"
+	case "status":
+		return "sco.status"
+	case "paid_at":
+		return "sco.paid_at"
+	case "refunded_at":
+		return "sco.refunded_at"
+	default:
+		return "sco.created_at"
 	}
 }
 
@@ -2632,6 +3481,13 @@ func parseMySQLEditableTime(value string) (time.Time, bool) {
 		return parsed, true
 	}
 	return time.Time{}, false
+}
+
+func absDecimal(value float64) float64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func normalizeOrderStatusValue(value, fallback string) (string, error) {

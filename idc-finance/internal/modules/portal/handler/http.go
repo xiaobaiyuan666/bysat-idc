@@ -20,8 +20,8 @@ func New(service *portalService.Service) *Handler {
 
 func (handler *Handler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/dashboard", handler.dashboard)
-	router.GET("/tickets", handler.tickets)
 	router.GET("/account", handler.account)
+	router.GET("/wallet", handler.wallet)
 }
 
 func (handler *Handler) dashboard(c *gin.Context) {
@@ -61,6 +61,20 @@ func (handler *Handler) account(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":      "CUSTOMER_NOT_FOUND",
 			"message":   "客户不存在",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(result, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) wallet(c *gin.Context) {
+	result, ok := handler.service.GetWallet(getPortalCustomerID(c))
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":      "CUSTOMER_NOT_FOUND",
+			"message":   "瀹㈡埛涓嶅瓨鍦?",
 			"requestId": middleware.GetRequestID(c),
 		})
 		return

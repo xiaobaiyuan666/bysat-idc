@@ -4,7 +4,7 @@ export default {
   path: "/catalog",
   redirect: "/catalog/products",
   meta: {
-    title: "商品设置",
+    title: "\u5546\u54c1\u8bbe\u7f6e",
     titleEn: "Catalog",
     requiresAuth: true
   },
@@ -13,13 +13,13 @@ export default {
       path: "products",
       name: "catalog-products",
       component: () => import("@/views/catalog/products/index.vue"),
-      meta: { title: "商品管理", titleEn: "Products", requiresAuth: true }
+      meta: { title: "\u5546\u54c1\u7ba1\u7406", titleEn: "Products", requiresAuth: true }
     },
     {
       path: "products/:id",
       name: "catalog-product-detail",
       component: () => import("@/views/catalog/products/detail/index.vue"),
-      meta: { title: "商品工作台", titleEn: "Product Workbench", requiresAuth: true, hiddenTag: false }
+      meta: { title: "\u5546\u54c1\u5de5\u4f5c\u53f0", titleEn: "Product Workbench", requiresAuth: true, hiddenTag: false }
     }
   ]
 } satisfies RouteRecordRaw;

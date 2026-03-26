@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	automationHandler "idc-finance/internal/modules/automation/handler"
@@ -24,12 +25,16 @@ import (
 	providerService "idc-finance/internal/modules/provider/service"
 	reportHandler "idc-finance/internal/modules/report/handler"
 	reportService "idc-finance/internal/modules/report/service"
+	ticketHandler "idc-finance/internal/modules/ticket/handler"
+	ticketRepository "idc-finance/internal/modules/ticket/repository"
+	ticketService "idc-finance/internal/modules/ticket/service"
 	"idc-finance/internal/platform/audit"
 	"idc-finance/internal/platform/auth"
 	"idc-finance/internal/platform/config"
 	appErrors "idc-finance/internal/platform/errors"
 	"idc-finance/internal/platform/middleware"
 	"idc-finance/internal/platform/rbac"
+	systemStore "idc-finance/internal/platform/system"
 
 	"github.com/gin-gonic/gin"
 )
@@ -42,6 +47,7 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 
 	auditService := buildAuditService(cfg, db)
 	taskService := buildAutomationService(cfg, db)
+	systemService := systemStore.NewService(filepath.Join("data", "system-state.json"), auditService)
 
 	customerRepo := buildCustomerRepository(cfg, db)
 	customerSvc := customerService.New(customerRepo, auditService)
@@ -51,7 +57,7 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 	providerRepo := buildProviderRepository(cfg, db)
 	providerSvc := providerService.New(cfg.MofangCloud, cfg.FinanceUpstream, providerRepo, db, auditService, taskService)
 	providerHTTP := providerHandler.New(providerSvc)
-	catalogSvc := catalogService.New(catalogRepo, auditService, providerSvc)
+	catalogSvc := catalogService.New(catalogRepo, auditService, providerSvc, filepath.Join("data", "catalog-upstream-sync-history.json"))
 	catalogHTTP := catalogHandler.New(catalogSvc)
 
 	orderRepo := buildOrderRepository(cfg, db)
@@ -61,6 +67,10 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 
 	reportSvc := reportService.New(db, customerSvc, orderSvc, auditService)
 	reportHTTP := reportHandler.New(reportSvc)
+
+	ticketRepo := buildTicketRepository(cfg, db)
+	ticketSvc := ticketService.New(ticketRepo, customerSvc, orderSvc, auditService, taskService)
+	ticketHTTP := ticketHandler.New(ticketSvc)
 
 	portalSvc := portalService.New(customerSvc, orderSvc)
 	portalHTTP := portalHandler.New(portalSvc)
@@ -90,51 +100,73 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 		c.JSON(http.StatusOK, appErrors.Ok(rbac.PhaseOneMenus(), middleware.GetRequestID(c)))
 	})
 	protected.GET("/permissions", func(c *gin.Context) {
-		c.JSON(http.StatusOK, appErrors.Ok([]string{
-			"workbench:view",
-			"customer:list",
-			"customer:view",
-			"customer:create",
-			"customer:update",
-			"customer:contact:list",
-			"customer:contact:create",
-			"customer:contact:update",
-			"customer:contact:delete",
-			"customer:identity:view",
-			"customer:identity:update",
-			"catalog:product:view",
-			"catalog:product:create",
-			"catalog:product:update",
-			"order:view",
-			"invoice:view",
-			"invoice:receive",
-			"invoice:refund",
-			"service:view",
-			"service:update",
-			"provider:view",
-			"provider:action",
-			"automation:view",
-			"automation:update",
-			"report:view",
-			"rbac:role:view",
-			"rbac:menu:view",
-			"audit:view",
-		}, middleware.GetRequestID(c)))
+		c.JSON(http.StatusOK, appErrors.Ok(systemStore.PermissionCodes(), middleware.GetRequestID(c)))
 	})
 	protected.GET("/audit-logs", func(c *gin.Context) {
 		c.JSON(http.StatusOK, appErrors.Ok(auditService.List(), middleware.GetRequestID(c)))
 	})
+	protected.GET("/admin-members", func(c *gin.Context) {
+		c.JSON(http.StatusOK, appErrors.Ok(systemService.ListAdmins(), middleware.GetRequestID(c)))
+	})
+	protected.POST("/admin-members", func(c *gin.Context) {
+		var payload systemStore.SaveAdminInput
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, appErrors.BadRequest("无效的管理员参数", middleware.GetRequestID(c)))
+			return
+		}
+		item, err := systemService.CreateAdmin(payload)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, appErrors.BadRequest(err.Error(), middleware.GetRequestID(c)))
+			return
+		}
+		c.JSON(http.StatusOK, appErrors.Ok(item, middleware.GetRequestID(c)))
+	})
+	protected.PATCH("/admin-members/:id", func(c *gin.Context) {
+		id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+		var payload systemStore.SaveAdminInput
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, appErrors.BadRequest("无效的管理员参数", middleware.GetRequestID(c)))
+			return
+		}
+		item, err := systemService.UpdateAdmin(id, payload)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, appErrors.BadRequest(err.Error(), middleware.GetRequestID(c)))
+			return
+		}
+		c.JSON(http.StatusOK, appErrors.Ok(item, middleware.GetRequestID(c)))
+	})
 	protected.GET("/roles", func(c *gin.Context) {
-		c.JSON(http.StatusOK, appErrors.Ok([]gin.H{
-			{"id": 1, "name": "系统管理员", "code": "super-admin", "users": 1},
-			{"id": 2, "name": "客服主管", "code": "support-manager", "users": 2},
-			{"id": 3, "name": "财务专员", "code": "finance-operator", "users": 1},
-		}, middleware.GetRequestID(c)))
+		c.JSON(http.StatusOK, appErrors.Ok(systemService.ListRoles(), middleware.GetRequestID(c)))
+	})
+	protected.POST("/roles", func(c *gin.Context) {
+		var payload systemStore.SaveRoleInput
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, appErrors.BadRequest("无效的角色参数", middleware.GetRequestID(c)))
+			return
+		}
+		item, err := systemService.CreateRole(payload)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, appErrors.BadRequest(err.Error(), middleware.GetRequestID(c)))
+			return
+		}
+		c.JSON(http.StatusOK, appErrors.Ok(item, middleware.GetRequestID(c)))
+	})
+	protected.PATCH("/roles/:id", func(c *gin.Context) {
+		id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+		var payload systemStore.SaveRoleInput
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, appErrors.BadRequest("无效的角色参数", middleware.GetRequestID(c)))
+			return
+		}
+		item, err := systemService.UpdateRole(id, payload)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, appErrors.BadRequest(err.Error(), middleware.GetRequestID(c)))
+			return
+		}
+		c.JSON(http.StatusOK, appErrors.Ok(item, middleware.GetRequestID(c)))
 	})
 	protected.GET("/admins", func(c *gin.Context) {
-		c.JSON(http.StatusOK, appErrors.Ok([]gin.H{
-			{"id": 1, "username": "admin", "displayName": "系统管理员", "status": "ACTIVE", "roles": []string{"super-admin"}},
-		}, middleware.GetRequestID(c)))
+		c.JSON(http.StatusOK, appErrors.Ok(systemService.ListAdmins(), middleware.GetRequestID(c)))
 	})
 	protected.GET("/menu-debug/:id", func(c *gin.Context) {
 		id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -144,6 +176,7 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 	customerHTTP.RegisterRoutes(protected)
 	catalogHTTP.RegisterAdminRoutes(protected)
 	orderHTTP.RegisterAdminRoutes(protected)
+	ticketHTTP.RegisterAdminRoutes(protected)
 	providerHTTP.RegisterAdminRoutes(protected)
 	automationHTTP.RegisterRoutes(protected)
 	reportHTTP.RegisterRoutes(protected)
@@ -152,6 +185,7 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 	portal.Use(auth.PortalGuard())
 	catalogHTTP.RegisterPortalRoutes(portal)
 	orderHTTP.RegisterPortalRoutes(portal)
+	ticketHTTP.RegisterPortalRoutes(portal)
 	portalHTTP.RegisterRoutes(portal)
 
 	return engine
@@ -197,4 +231,11 @@ func buildProviderRepository(cfg config.AppConfig, db *sql.DB) providerRepositor
 		return providerRepository.NewMySQLRepository(db)
 	}
 	return providerRepository.NewMemoryRepository()
+}
+
+func buildTicketRepository(cfg config.AppConfig, db *sql.DB) ticketRepository.Repository {
+	if cfg.StorageDriver == "mysql" && db != nil {
+		return ticketRepository.NewMySQLRepository(db)
+	}
+	return ticketRepository.NewMemoryRepository()
 }

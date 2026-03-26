@@ -4,7 +4,10 @@ import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import ContextTabs from "@/components/workbench/ContextTabs.vue";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
+import { useLocaleStore } from "@/store";
+import { formatPaymentChannel } from "@/utils/business";
 import {
+  type AccountTransactionRecord,
   createCustomerContact,
   deleteCustomerContact,
   fetchCustomerAuditLogs,
@@ -12,28 +15,51 @@ import {
   fetchCustomerDetail,
   fetchCustomerIdentitiesDetail,
   fetchCustomerInvoices,
+  fetchPayments,
+  fetchRefunds,
   fetchCustomerServices,
   fetchCustomerTickets,
+  fetchCustomerWallet,
   reviewCustomerIdentity,
   updateCustomer,
   updateCustomerContact,
   type AuditLog,
   type Contact,
   type Customer,
+  type CustomerWalletResponse,
   type IdentityRecord,
-  type RelatedItem
+  type PaymentRecord,
+  type RelatedItem,
+  type RefundRecord
 } from "@/api/admin";
 
 type WorkbenchRelatedItem = RelatedItem & { entityId?: number };
 
+type FinanceTimelineItem = {
+  key: string;
+  occurredAt: string;
+  title: string;
+  description: string;
+  referenceNo: string;
+  amount: number | undefined;
+  categoryLabel: string;
+  type: "primary" | "success" | "warning" | "danger" | "info";
+  invoiceId?: number;
+  linkKeyword?: string;
+  transactionType?: string;
+  target: "invoice" | "payment" | "refund" | "account";
+};
+
 const route = useRoute();
 const router = useRouter();
+const localeStore = useLocaleStore();
 
 const loading = ref(false);
 const contactDialogVisible = ref(false);
 const contactSubmitting = ref(false);
 const savingCustomer = ref(false);
 const editingContactId = ref<number | null>(null);
+const walletDetail = ref<CustomerWalletResponse | null>(null);
 
 const customer = reactive<Customer>({
   id: 0,
@@ -53,6 +79,8 @@ const contacts = ref<Contact[]>([]);
 const identities = ref<IdentityRecord[]>([]);
 const services = ref<WorkbenchRelatedItem[]>([]);
 const invoices = ref<WorkbenchRelatedItem[]>([]);
+const payments = ref<PaymentRecord[]>([]);
+const refunds = ref<RefundRecord[]>([]);
 const tickets = ref<WorkbenchRelatedItem[]>([]);
 const auditLogs = ref<AuditLog[]>([]);
 
@@ -68,20 +96,82 @@ const customerId = computed(() => route.params.id as string);
 const approvedIdentityCount = computed(
   () => identities.value.filter(item => item.verifyStatus === "APPROVED").length
 );
-const pendingIdentityCount = computed(
-  () => identities.value.filter(item => item.verifyStatus === "PENDING").length
-);
-const activeServiceCount = computed(() => services.value.filter(item => item.status === "ACTIVE").length);
-const suspendedServiceCount = computed(() => services.value.filter(item => item.status === "SUSPENDED").length);
-const mofangServiceCount = computed(() => services.value.filter(item => item.providerType === "MOFANG_CLOUD").length);
-const serviceWithPublicIpCount = computed(
-  () => services.value.filter(item => item.ipAddress && item.ipAddress !== "-").length
-);
-const syncedCustomer = computed(() => customer.remarks.includes("魔方云同步"));
-const primaryContact = computed(() => contacts.value.find(item => item.isPrimary) ?? contacts.value[0] ?? null);
-const latestService = computed(() => services.value[0] ?? null);
-const latestInvoice = computed(() => invoices.value[0] ?? null);
-const latestTicket = computed(() => tickets.value[0] ?? null);
+const walletTransactionCount = computed(() => walletDetail.value?.transactions.length ?? 0);
+const walletBalance = computed(() => walletDetail.value?.wallet.balance ?? 0);
+const walletAvailableCredit = computed(() => walletDetail.value?.wallet.availableCredit ?? 0);
+const walletUpdatedAt = computed(() => walletDetail.value?.wallet.updatedAt || "-");
+const financeEventCount = computed(() => payments.value.length + refunds.value.length);
+const financeTimeline = computed<FinanceTimelineItem[]>(() => {
+  const invoiceItems = invoices.value
+    .map(item => {
+      const paidAt = String((item as Record<string, unknown>).paidAt ?? "");
+      const occurredAt = paidAt || item.dueAt || "";
+      if (!occurredAt) return null;
+      const amount = Number(item.totalAmount);
+      return {
+        key: `invoice-${item.entityId ?? item.invoiceNo}`,
+        occurredAt,
+        title:
+          item.status === "PAID" ? "账单已支付" : item.status === "REFUNDED" ? "账单已退款" : "账单待支付",
+        description: `${item.productName ?? "关联产品"} · ${invoiceStatusLabel(item.status ?? "")}`,
+        referenceNo: item.invoiceNo ?? "-",
+        amount: Number.isFinite(amount) ? amount : undefined,
+        categoryLabel: "账单",
+        type: invoiceStatusTag(item.status ?? ""),
+        invoiceId: item.entityId,
+        target: "invoice" as const
+      };
+    })
+    .filter(Boolean) as FinanceTimelineItem[];
+
+  const paymentItems = payments.value.map(item => ({
+    key: `payment-${item.id}`,
+    occurredAt: item.paidAt,
+    title: "支付入账",
+    description: `${invoiceNoById(item.invoiceId)} · ${formatPaymentChannel(localeStore.locale, item.channel || "SYSTEM")}`,
+    referenceNo: item.paymentNo,
+    linkKeyword: item.paymentNo,
+    amount: item.amount,
+    categoryLabel: "支付",
+    type: "success" as const,
+    invoiceId: item.invoiceId,
+    target: "payment" as const
+  }));
+
+  const refundItems = refunds.value.map(item => ({
+    key: `refund-${item.id}`,
+    occurredAt: item.createdAt,
+    title: "退款完成",
+    description: `${invoiceNoById(item.invoiceId)} · ${item.reason || "后台人工退款"}`,
+    referenceNo: item.refundNo,
+    linkKeyword: item.refundNo,
+    amount: item.amount,
+    categoryLabel: "退款",
+    type: "warning" as const,
+    invoiceId: item.invoiceId,
+    target: "refund" as const
+  }));
+
+  const accountItems = (walletDetail.value?.transactions ?? []).map(item => ({
+    key: `account-${item.id}`,
+    occurredAt: item.occurredAt,
+    title: `资金台账 · ${transactionTypeLabel(item.transactionType)}`,
+    description: item.summary || item.remark || walletActionLabel(item),
+    referenceNo: item.transactionNo,
+    linkKeyword: item.transactionNo,
+    amount: item.amount,
+    categoryLabel: "台账",
+    type: directionTag(item.direction) as FinanceTimelineItem["type"],
+    invoiceId: item.invoiceId > 0 ? item.invoiceId : undefined,
+    transactionType: item.transactionType,
+    target: "account" as const
+  }));
+
+  return ([...paymentItems, ...refundItems, ...accountItems, ...invoiceItems] as FinanceTimelineItem[])
+    .filter(item => Boolean(item.occurredAt))
+    .sort((left, right) => parseTimelineTime(right.occurredAt) - parseTimelineTime(left.occurredAt))
+    .slice(0, 24);
+});
 
 const contextItems = computed(() => [
   {
@@ -105,8 +195,14 @@ const contextItems = computed(() => [
   {
     key: "invoice",
     label: "账单管理",
-    to: "/billing/invoices",
+    to: customer.id ? `/billing/invoices?customerId=${customer.id}` : "/billing/invoices",
     badge: invoices.value.length
+  },
+  {
+    key: "finance",
+    label: "资金台账",
+    to: customer.id ? `/billing/accounts?customerId=${customer.id}` : "/billing/accounts",
+    badge: financeEventCount.value || walletTransactionCount.value
   },
   {
     key: "order",
@@ -115,153 +211,12 @@ const contextItems = computed(() => [
   }
 ]);
 
-const serviceRegionSummary = computed(() =>
-  summarizeLabels(services.value.map(item => item.regionName), 6)
-);
-const providerSummary = computed(() =>
-  summarizeLabels(services.value.map(item => formatProviderTypeLabel(item.providerType)), 4)
-);
-const serviceStatusSummary = computed(() =>
-  summarizeLabels(services.value.map(item => formatServiceStatusLabel(item.status)), 4)
-);
-const customerSignals = computed(() => {
-  const result: Array<{
-    type: "success" | "info" | "warning";
-    title: string;
-    description: string;
-  }> = [];
-
-  if (syncedCustomer.value) {
-    result.push({
-      type: "info",
-      title: "当前客户来自魔方云同步",
-      description: "这类客户会优先带入服务、资源和实例关系，联系人、实名和账单通常需要后续按运营流程补齐。"
-    });
-  }
-
-  if (!primaryContact.value) {
-    result.push({
-      type: "warning",
-      title: "还没有主联系人",
-      description: "建议至少补充 1 个主联系人，方便后续客服通知、欠费提醒和工单协作。"
-    });
-  }
-
-  if (approvedIdentityCount.value === 0) {
-    result.push({
-      type: "warning",
-      title: "未完成实名",
-      description: "当前没有已通过的实名档案，如需按合规流程交付资源，建议先补充实名认证资料。"
-    });
-  } else if (pendingIdentityCount.value > 0) {
-    result.push({
-      type: "info",
-      title: "存在待审核实名资料",
-      description: `当前还有 ${pendingIdentityCount.value} 份实名资料待审核，可以优先处理。`
-    });
-  }
-
-  if (services.value.length > 0 && invoices.value.length === 0) {
-    result.push({
-      type: "info",
-      title: "当前没有本地账单",
-      description: "说明这位客户目前以同步服务为主，财务对象还没有在本地系统完整沉淀。"
-    });
-  }
-
-  if (services.value.length > 0 && activeServiceCount.value === 0) {
-    result.push({
-      type: "warning",
-      title: "当前没有运行中的服务",
-      description: "客户虽然有关联服务，但当前都不在运行态，建议核对是否已暂停、已终止或待恢复。"
-    });
-  }
-
-  if (result.length === 0) {
-    result.push({
-      type: "success",
-      title: "客户资料状态良好",
-      description: "联系人、服务和关联数据已经具备继续跟进和运营处理的基础条件。"
-    });
-  }
-
-  return result;
-});
-const recentActivities = computed(() => {
-  const result: Array<{
-    key: string;
-    label: string;
-    value: string;
-    meta: string;
-    actionLabel?: string;
-    action?: () => void;
-  }> = [];
-
-  if (latestService.value) {
-    result.push({
-      key: "service",
-      label: "最近服务",
-      value: `${latestService.value.serviceNo} / ${latestService.value.productName}`,
-      meta: `${formatServiceStatusLabel(latestService.value.status)} · ${latestService.value.regionName || "未同步地域"}`,
-      actionLabel: latestService.value.entityId ? "打开服务" : undefined,
-      action: latestService.value.entityId ? () => openServiceDetail(latestService.value!) : undefined
-    });
-  }
-
-  if (latestInvoice.value) {
-    result.push({
-      key: "invoice",
-      label: "最近账单",
-      value: `${latestInvoice.value.invoiceNo} / ${formatAmount(latestInvoice.value.totalAmount)}`,
-      meta: `${formatInvoiceStatusLabel(latestInvoice.value.status)} · ${latestInvoice.value.dueAt || "无到期时间"}`,
-      actionLabel: latestInvoice.value.entityId ? "打开账单" : undefined,
-      action: latestInvoice.value.entityId ? () => openInvoiceDetail(latestInvoice.value!) : undefined
-    });
-  }
-
-  if (latestTicket.value) {
-    result.push({
-      key: "ticket",
-      label: "最近工单",
-      value: `${latestTicket.value.ticketNo} / ${latestTicket.value.title}`,
-      meta: `${formatTicketStatusLabel(latestTicket.value.status)} · ${latestTicket.value.updatedAt || "无更新时间"}`
-    });
-  }
-
-  if (auditLogs.value[0]) {
-    result.push({
-      key: "audit",
-      label: "最近操作",
-      value: auditLogs.value[0].description || auditLogs.value[0].action,
-      meta: `${auditLogs.value[0].actor || "系统"} · ${auditLogs.value[0].createdAt || "未知时间"}`
-    });
-  }
-
-  return result;
-});
-
 function pickEntityId(item: RelatedItem, keys: string[]) {
   for (const key of keys) {
     const value = Number((item as Record<string, unknown>)[key]);
     if (Number.isFinite(value) && value > 0) return value;
   }
   return undefined;
-}
-
-function summarizeLabels(values: Array<string | undefined>, limit = 5) {
-  const counter = new Map<string, number>();
-  for (const item of values) {
-    const label = (item || "").trim();
-    if (!label || label === "-") continue;
-    counter.set(label, (counter.get(label) ?? 0) + 1);
-  }
-  return Array.from(counter.entries())
-    .map(([label, count]) => ({ label, count }))
-    .sort((left, right) => {
-      if (right.count !== left.count) return right.count - left.count;
-      return left.label.localeCompare(right.label, "zh-CN");
-    })
-    .slice(0, limit);
 }
 
 function resetContactForm() {
@@ -279,11 +234,7 @@ function normalizeServices(items: RelatedItem[]) {
     entityId: pickEntityId(item, ["serviceId", "id"]),
     serviceNo: item.serviceNo ?? item.no ?? "-",
     productName: item.productName ?? item.name ?? "-",
-    nextDueAt: item.nextDueAt ?? item.dueAt ?? "-",
-    providerType: item.providerType ?? "-",
-    regionName: item.regionName ?? "-",
-    ipAddress: item.ipAddress ?? "-",
-    description: item.description ?? "-"
+    nextDueAt: item.nextDueAt ?? item.dueAt ?? "-"
   }));
 }
 
@@ -324,87 +275,6 @@ function formatCustomerStatus(status: string) {
   return mapping[status] ?? status;
 }
 
-function formatProviderTypeLabel(type?: string) {
-  const mapping: Record<string, string> = {
-    MOFANG_CLOUD: "魔方云",
-    ZJMF_API: "上下游财务",
-    RESOURCE: "资源池",
-    MANUAL: "手动资源",
-    LOCAL: "本地模块"
-  };
-  return mapping[type ?? ""] ?? type ?? "-";
-}
-
-function formatServiceStatusLabel(status?: string) {
-  const mapping: Record<string, string> = {
-    ACTIVE: "运行中",
-    PENDING: "待开通",
-    SUSPENDED: "已暂停",
-    TERMINATED: "已终止",
-    PROVISIONING: "处理中",
-    FAILED: "异常"
-  };
-  return mapping[status ?? ""] ?? status ?? "-";
-}
-
-function serviceStatusTag(status?: string) {
-  const mapping: Record<string, string> = {
-    ACTIVE: "success",
-    PENDING: "warning",
-    SUSPENDED: "info",
-    TERMINATED: "danger",
-    PROVISIONING: "primary",
-    FAILED: "danger"
-  };
-  return mapping[status ?? ""] ?? "info";
-}
-
-function formatInvoiceStatusLabel(status?: string) {
-  const mapping: Record<string, string> = {
-    PAID: "已支付",
-    UNPAID: "未支付",
-    OVERDUE: "已逾期",
-    CANCELLED: "已取消",
-    REFUNDED: "已退款",
-    DRAFT: "草稿"
-  };
-  return mapping[status ?? ""] ?? status ?? "-";
-}
-
-function invoiceStatusTag(status?: string) {
-  const mapping: Record<string, string> = {
-    PAID: "success",
-    UNPAID: "warning",
-    OVERDUE: "danger",
-    CANCELLED: "info",
-    REFUNDED: "info",
-    DRAFT: "info"
-  };
-  return mapping[status ?? ""] ?? "info";
-}
-
-function formatTicketStatusLabel(status?: string) {
-  const mapping: Record<string, string> = {
-    OPEN: "待处理",
-    IN_PROGRESS: "处理中",
-    REPLY: "待回复",
-    CLOSED: "已关闭",
-    RESOLVED: "已解决"
-  };
-  return mapping[status ?? ""] ?? status ?? "-";
-}
-
-function ticketStatusTag(status?: string) {
-  const mapping: Record<string, string> = {
-    OPEN: "warning",
-    IN_PROGRESS: "primary",
-    REPLY: "warning",
-    CLOSED: "info",
-    RESOLVED: "success"
-  };
-  return mapping[status ?? ""] ?? "info";
-}
-
 function customerStatusTag(status: string) {
   const mapping: Record<string, string> = {
     ACTIVE: "success",
@@ -439,6 +309,41 @@ function formatAmount(value: string | number | undefined) {
   return `¥${amount.toFixed(2)}`;
 }
 
+function formatWalletMoney(value: string | number | undefined) {
+  if (value === undefined || value === null || value === "") return "¥0.00";
+  const amount = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(amount) ? `¥${amount.toFixed(2)}` : String(value);
+}
+
+function transactionTypeLabel(value: string) {
+  const mapping: Record<string, string> = {
+    RECHARGE: "充值",
+    CONSUME: "余额支付",
+    REFUND: "退款回退",
+    ADJUSTMENT: "手工调整",
+    CREDIT_LIMIT: "授信调整"
+  };
+  return mapping[value] ?? value;
+}
+
+function directionTag(value: string) {
+  const mapping: Record<string, string> = {
+    IN: "success",
+    OUT: "danger",
+    FLAT: "info"
+  };
+  return mapping[value] ?? "info";
+}
+
+function directionLabel(value: string) {
+  const mapping: Record<string, string> = {
+    IN: "收入",
+    OUT: "支出",
+    FLAT: "平移"
+  };
+  return mapping[value] ?? value;
+}
+
 function openServiceDetail(row: WorkbenchRelatedItem) {
   if (!row.entityId) return;
   void router.push(`/services/detail/${row.entityId}`);
@@ -449,24 +354,209 @@ function openInvoiceDetail(row: WorkbenchRelatedItem) {
   void router.push(`/billing/invoices/${row.entityId}`);
 }
 
-function openLatestService() {
-  if (!latestService.value) return;
-  openServiceDetail(latestService.value);
+function openInvoiceById(invoiceId: number) {
+  const invoice = invoices.value.find(item => item.entityId === invoiceId);
+  if (invoice?.entityId) {
+    openInvoiceDetail(invoice);
+    return;
+  }
+  void router.push(`/billing/invoices/${invoiceId}`);
+}
+
+function openInvoiceWorkbench(status?: "UNPAID" | "PAID" | "REFUNDED") {
+  const query: Record<string, string> = {};
+  if (customer.id) {
+    query.customerId = String(customer.id);
+  }
+  if (status) {
+    query.status = status;
+  }
+  void router.push({ path: "/billing/invoices", query });
+}
+
+function openPaymentWorkbench(keyword?: string) {
+  const query: Record<string, string> = {};
+  if (customer.id) {
+    query.customerId = String(customer.id);
+  }
+  if (keyword) {
+    query.keyword = keyword;
+  }
+  void router.push({ path: "/billing/payments", query });
+}
+
+function openRefundWorkbench(keyword?: string) {
+  const query: Record<string, string> = {};
+  if (customer.id) {
+    query.customerId = String(customer.id);
+  }
+  if (keyword) {
+    query.keyword = keyword;
+  }
+  void router.push({ path: "/billing/refunds", query });
+}
+
+function openFinanceWorkbench(action?: "recharge" | "deduct" | "credit") {
+  const query: Record<string, string> = {};
+  if (customer.id) {
+    query.customerId = String(customer.id);
+  }
+  if (action) {
+    query.action = action;
+  }
+  void router.push({ path: "/billing/accounts", query });
+}
+
+function openRechargeWorkbench(keyword?: string) {
+  const query: Record<string, string> = {};
+  if (customer.id) {
+    query.customerId = String(customer.id);
+  }
+  if (keyword) {
+    query.keyword = keyword;
+  }
+  void router.push({ path: "/billing/recharges", query });
+}
+
+function openAdjustmentWorkbench(keyword?: string, transactionType?: string) {
+  const query: Record<string, string> = {};
+  if (customer.id) {
+    query.customerId = String(customer.id);
+  }
+  if (keyword) {
+    query.keyword = keyword;
+  }
+  if (transactionType) {
+    query.transactionType = transactionType;
+  }
+  void router.push({ path: "/billing/adjustments", query });
+}
+
+function walletActionLabel(row: AccountTransactionRecord) {
+  return `${directionLabel(row.direction)} · ${transactionTypeLabel(row.transactionType)}`;
+}
+
+function invoiceNoById(invoiceId: number) {
+  return invoices.value.find(item => item.entityId === invoiceId)?.invoiceNo ?? `#${invoiceId}`;
+}
+
+function paymentStatusLabel(status: string) {
+  const mapping: Record<string, string> = {
+    COMPLETED: "已收款"
+  };
+  return mapping[status] ?? status;
+}
+
+function paymentStatusTag(status: string) {
+  const mapping: Record<string, string> = {
+    COMPLETED: "success"
+  };
+  return mapping[status] ?? "info";
+}
+
+function refundStatusLabel(status: string) {
+  const mapping: Record<string, string> = {
+    COMPLETED: "已退款"
+  };
+  return mapping[status] ?? status;
+}
+
+function refundStatusTag(status: string) {
+  const mapping: Record<string, string> = {
+    COMPLETED: "warning"
+  };
+  return mapping[status] ?? "info";
+}
+
+function invoiceStatusLabel(status: string) {
+  const mapping: Record<string, string> = {
+    UNPAID: "待支付",
+    PAID: "已支付",
+    REFUNDED: "已退款"
+  };
+  return mapping[status] ?? status;
+}
+
+function invoiceStatusTag(status: string) {
+  const mapping: Record<string, FinanceTimelineItem["type"]> = {
+    UNPAID: "warning",
+    PAID: "success",
+    REFUNDED: "info"
+  };
+  return mapping[status] ?? "primary";
+}
+
+function parseTimelineTime(value: string) {
+  const normalized = String(value || "").trim().replace(" ", "T");
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function openFinanceTimelineTarget(item: FinanceTimelineItem) {
+  if (item.target === "account") {
+    if (item.transactionType === "RECHARGE") {
+      openRechargeWorkbench(item.linkKeyword);
+      return;
+    }
+    if (item.transactionType === "ADJUSTMENT" || item.transactionType === "CREDIT_LIMIT") {
+      openAdjustmentWorkbench(item.linkKeyword, item.transactionType);
+      return;
+    }
+    openFinanceWorkbench();
+    return;
+  }
+  if (item.target === "payment") {
+    openPaymentWorkbench(item.linkKeyword);
+    return;
+  }
+  if (item.target === "refund") {
+    openRefundWorkbench(item.linkKeyword);
+    return;
+  }
+  if (item.invoiceId) {
+    openInvoiceById(item.invoiceId);
+    return;
+  }
+  openInvoiceWorkbench();
 }
 
 async function loadDetail() {
   loading.value = true;
   try {
-    const id = customerId.value;
-    const [customerData, contactData, identityData, serviceData, invoiceData, ticketData, auditData] =
+    const id = Number(customerId.value);
+    const [
+      customerData,
+      contactData,
+      identityData,
+      serviceData,
+      invoiceData,
+      paymentData,
+      refundData,
+      ticketData,
+      auditData,
+      walletData
+    ] =
       await Promise.all([
         fetchCustomerDetail(id),
         fetchCustomerContacts(id),
         fetchCustomerIdentitiesDetail(id),
         fetchCustomerServices(id),
         fetchCustomerInvoices(id),
+        fetchPayments({
+          customerId: id,
+          limit: 20,
+          sort: "paid_at",
+          order: "desc"
+        }),
+        fetchRefunds({
+          customerId: id,
+          limit: 20,
+          sort: "created_at",
+          order: "desc"
+        }),
         fetchCustomerTickets(id),
-        fetchCustomerAuditLogs(id)
+        fetchCustomerAuditLogs(id),
+        fetchCustomerWallet(id).catch(() => null)
       ]);
 
     Object.assign(customer, customerData);
@@ -474,8 +564,11 @@ async function loadDetail() {
     identities.value = identityData;
     services.value = normalizeServices(serviceData);
     invoices.value = normalizeInvoices(invoiceData);
+    payments.value = paymentData.items;
+    refunds.value = refundData.items;
     tickets.value = normalizeTickets(ticketData);
     auditLogs.value = auditData;
+    walletDetail.value = walletData;
   } finally {
     loading.value = false;
   }
@@ -565,6 +658,9 @@ onMounted(() => {
       <template #actions>
         <el-button @click="router.push('/customer/list')">返回列表</el-button>
         <el-button @click="loadDetail">刷新详情</el-button>
+        <el-button type="primary" plain @click="openFinanceWorkbench()">资金台账</el-button>
+        <el-button plain @click="openRechargeWorkbench()">充值记录</el-button>
+        <el-button plain @click="openAdjustmentWorkbench()">资金调整</el-button>
         <el-button type="primary" :loading="savingCustomer" @click="saveCustomer">
           保存客户资料
         </el-button>
@@ -603,49 +699,18 @@ onMounted(() => {
             <strong class="detail-kpi-card__value">{{ services.length }}</strong>
           </div>
           <div class="detail-kpi-card">
-            <span class="detail-kpi-card__label">公网 IP 服务</span>
-            <strong class="detail-kpi-card__value">{{ serviceWithPublicIpCount }}</strong>
+            <span class="detail-kpi-card__label">账户余额</span>
+            <strong class="detail-kpi-card__value">{{ formatWalletMoney(walletBalance) }}</strong>
+          </div>
+          <div class="detail-kpi-card">
+            <span class="detail-kpi-card__label">可用授信</span>
+            <strong class="detail-kpi-card__value">{{ formatWalletMoney(walletAvailableCredit) }}</strong>
           </div>
         </div>
       </template>
 
       <el-tabs>
         <el-tab-pane label="客户概览">
-          <div class="signal-grid">
-            <el-alert
-              v-for="item in customerSignals"
-              :key="item.title"
-              :type="item.type"
-              :closable="false"
-              show-icon
-              :title="item.title"
-              :description="item.description"
-            />
-          </div>
-
-          <div class="detail-kpi-grid" style="margin-bottom: 16px">
-            <div class="detail-kpi-card">
-              <span class="detail-kpi-card__label">关联服务</span>
-              <strong class="detail-kpi-card__value">{{ services.length }}</strong>
-            </div>
-            <div class="detail-kpi-card">
-              <span class="detail-kpi-card__label">运行中</span>
-              <strong class="detail-kpi-card__value">{{ activeServiceCount }}</strong>
-            </div>
-            <div class="detail-kpi-card">
-              <span class="detail-kpi-card__label">已暂停</span>
-              <strong class="detail-kpi-card__value">{{ suspendedServiceCount }}</strong>
-            </div>
-            <div class="detail-kpi-card">
-              <span class="detail-kpi-card__label">魔方云服务</span>
-              <strong class="detail-kpi-card__value">{{ mofangServiceCount }}</strong>
-            </div>
-            <div class="detail-kpi-card">
-              <span class="detail-kpi-card__label">公网 IP 覆盖</span>
-              <strong class="detail-kpi-card__value">{{ serviceWithPublicIpCount }}</strong>
-            </div>
-          </div>
-
           <div class="customer-grid">
             <div class="page-card inner-card">
               <div class="section-card__head">
@@ -683,13 +748,6 @@ onMounted(() => {
                 <span class="section-card__meta">对象关系总览</span>
               </div>
               <el-descriptions :column="1" border>
-                <el-descriptions-item label="主联系人">
-                  {{
-                    primaryContact
-                      ? `${primaryContact.name} / ${primaryContact.mobile || primaryContact.email || "未填写联系方式"}`
-                      : "未设置"
-                  }}
-                </el-descriptions-item>
                 <el-descriptions-item label="客户类型">
                   {{ formatCustomerType(customer.type) }}
                 </el-descriptions-item>
@@ -702,6 +760,9 @@ onMounted(() => {
                 <el-descriptions-item label="关联账单">
                   {{ invoices.length }}
                 </el-descriptions-item>
+                <el-descriptions-item label="支付与退款">
+                  {{ financeEventCount }}
+                </el-descriptions-item>
                 <el-descriptions-item label="关联工单">
                   {{ tickets.length }}
                 </el-descriptions-item>
@@ -709,97 +770,73 @@ onMounted(() => {
                   {{ auditLogs.length }}
                 </el-descriptions-item>
               </el-descriptions>
-
-              <div class="quick-actions-grid">
-                <el-button type="primary" :disabled="!latestService?.entityId" @click="openLatestService">
-                  打开最近服务
-                </el-button>
-                <el-button @click="openCreateContact">补充联系人</el-button>
-                <el-button @click="router.push('/services/list')">查看服务列表</el-button>
-                <el-button :disabled="!latestInvoice?.entityId" @click="latestInvoice && openInvoiceDetail(latestInvoice)">
-                  打开最近账单
-                </el-button>
-              </div>
             </div>
           </div>
 
-          <div class="overview-grid">
+          <div class="customer-grid customer-grid--finance" style="margin-top: 16px">
             <div class="page-card inner-card">
               <div class="section-card__head">
-                <strong>服务画像</strong>
-                <span class="section-card__meta">地域、渠道和状态分布</span>
+                <strong>钱包与授信</strong>
+                <span class="section-card__meta">{{ walletUpdatedAt }}</span>
               </div>
-
-              <div class="overview-section">
-                <span class="overview-section__label">主要地域</span>
-                <div class="summary-chip-list">
-                  <span v-for="item in serviceRegionSummary" :key="`region-${item.label}`" class="summary-chip">
-                    {{ item.label }} · {{ item.count }}
-                  </span>
-                  <span v-if="!serviceRegionSummary.length" class="summary-chip summary-chip--muted">暂无地域数据</span>
+              <div v-if="walletDetail" class="summary-strip" style="margin-bottom: 16px">
+                <div class="summary-pill">
+                  <span>账户余额</span>
+                  <strong>{{ formatWalletMoney(walletDetail.wallet.balance) }}</strong>
+                </div>
+                <div class="summary-pill">
+                  <span>授信额度</span>
+                  <strong>{{ formatWalletMoney(walletDetail.wallet.creditLimit) }}</strong>
+                </div>
+                <div class="summary-pill">
+                  <span>已用授信</span>
+                  <strong>{{ formatWalletMoney(walletDetail.wallet.creditUsed) }}</strong>
+                </div>
+                <div class="summary-pill">
+                  <span>可用授信</span>
+                  <strong>{{ formatWalletMoney(walletDetail.wallet.availableCredit) }}</strong>
                 </div>
               </div>
-
-              <div class="overview-section">
-                <span class="overview-section__label">渠道分布</span>
-                <div class="summary-chip-list">
-                  <span v-for="item in providerSummary" :key="`provider-${item.label}`" class="summary-chip">
-                    {{ item.label }} · {{ item.count }}
-                  </span>
-                  <span v-if="!providerSummary.length" class="summary-chip summary-chip--muted">暂无渠道数据</span>
-                </div>
+              <el-empty v-else description="暂无钱包与授信记录" :image-size="72" />
+              <div class="inline-actions">
+                <el-button type="primary" plain @click="openFinanceWorkbench('recharge')">线下充值</el-button>
+                <el-button type="warning" plain @click="openFinanceWorkbench('deduct')">扣减余额</el-button>
+                <el-button type="primary" @click="openFinanceWorkbench('credit')">调整授信</el-button>
+                <el-button @click="openFinanceWorkbench()">打开资金台账</el-button>
+                <el-button plain @click="openRechargeWorkbench()">查看充值记录</el-button>
+                <el-button plain @click="openAdjustmentWorkbench()">查看调整记录</el-button>
               </div>
-
-              <div class="overview-section">
-                <span class="overview-section__label">服务状态</span>
-                <div class="summary-chip-list">
-                  <span v-for="item in serviceStatusSummary" :key="`status-${item.label}`" class="summary-chip">
-                    {{ item.label }} · {{ item.count }}
-                  </span>
-                  <span v-if="!serviceStatusSummary.length" class="summary-chip summary-chip--muted">暂无状态数据</span>
-                </div>
-              </div>
-
-              <el-table :data="services.slice(0, 5)" border stripe empty-text="暂无服务记录">
-                <el-table-column prop="serviceNo" label="服务编号" min-width="160" />
-                <el-table-column prop="productName" label="产品" min-width="180" />
-                <el-table-column label="状态" min-width="110">
-                  <template #default="{ row }">
-                    <el-tag :type="serviceStatusTag(row.status)" effect="light">
-                      {{ formatServiceStatusLabel(row.status) }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="ipAddress" label="IP" min-width="150" />
-                <el-table-column label="操作" min-width="120" fixed="right">
-                  <template #default="{ row }">
-                    <el-button type="primary" link :disabled="!row.entityId" @click="openServiceDetail(row)">
-                      打开
-                    </el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
             </div>
 
             <div class="page-card inner-card">
               <div class="section-card__head">
-                <strong>最近业务</strong>
-                <span class="section-card__meta">最近服务、账单、工单和操作</span>
+                <strong>最近资金流水</strong>
+                <span class="section-card__meta">最近 5 条</span>
               </div>
-
-              <div v-if="recentActivities.length" class="activity-list">
-                <div v-for="item in recentActivities" :key="item.key" class="activity-card">
-                  <div class="activity-card__head">
-                    <strong>{{ item.label }}</strong>
-                    <el-button v-if="item.action && item.actionLabel" type="primary" link @click="item.action()">
-                      {{ item.actionLabel }}
-                    </el-button>
-                  </div>
-                  <div class="activity-card__value">{{ item.value }}</div>
-                  <div class="activity-card__meta">{{ item.meta }}</div>
-                </div>
-              </div>
-              <el-empty v-else description="当前没有最近业务记录" :image-size="88" />
+              <el-table
+                v-if="walletDetail?.transactions.length"
+                :data="walletDetail.transactions.slice(0, 5)"
+                border
+                stripe
+                size="small"
+                empty-text="暂无流水"
+              >
+                <el-table-column prop="transactionNo" label="流水号" min-width="150" />
+                <el-table-column label="动作" min-width="130">
+                  <template #default="{ row }">
+                    <el-tag :type="directionTag(row.direction)" effect="light">{{ walletActionLabel(row) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="渠道" min-width="110">
+                  <template #default="{ row }">{{ formatPaymentChannel(localeStore.locale, row.channel || "SYSTEM") }}</template>
+                </el-table-column>
+                <el-table-column label="金额" min-width="110">
+                  <template #default="{ row }">{{ formatWalletMoney(row.amount) }}</template>
+                </el-table-column>
+                <el-table-column prop="summary" label="摘要" min-width="180" show-overflow-tooltip />
+                <el-table-column prop="occurredAt" label="时间" min-width="160" />
+              </el-table>
+              <el-empty v-else description="暂无资金流水" :image-size="72" />
             </div>
           </div>
         </el-tab-pane>
@@ -875,20 +912,8 @@ onMounted(() => {
           <el-table :data="services" border stripe empty-text="暂无关联服务">
             <el-table-column prop="serviceNo" label="服务编号" min-width="180" />
             <el-table-column prop="productName" label="产品名称" min-width="220" />
-            <el-table-column label="渠道" min-width="130">
-              <template #default="{ row }">{{ formatProviderTypeLabel(row.providerType) }}</template>
-            </el-table-column>
-            <el-table-column prop="regionName" label="地域" min-width="150" />
-            <el-table-column prop="ipAddress" label="公网 IP" min-width="160" />
-            <el-table-column label="状态" min-width="120">
-              <template #default="{ row }">
-                <el-tag :type="serviceStatusTag(row.status)" effect="light">
-                  {{ formatServiceStatusLabel(row.status) }}
-                </el-tag>
-              </template>
-            </el-table-column>
+            <el-table-column prop="status" label="状态" min-width="120" />
             <el-table-column prop="nextDueAt" label="到期时间" min-width="180" />
-            <el-table-column prop="description" label="同步说明" min-width="220" show-overflow-tooltip />
             <el-table-column label="操作" min-width="140" fixed="right">
               <template #default="{ row }">
                 <el-button type="primary" link :disabled="!row.entityId" @click="openServiceDetail(row)">
@@ -905,13 +930,7 @@ onMounted(() => {
             <el-table-column label="金额" min-width="120">
               <template #default="{ row }">{{ formatAmount(row.totalAmount) }}</template>
             </el-table-column>
-            <el-table-column label="状态" min-width="120">
-              <template #default="{ row }">
-                <el-tag :type="invoiceStatusTag(row.status)" effect="light">
-                  {{ formatInvoiceStatusLabel(row.status) }}
-                </el-tag>
-              </template>
-            </el-table-column>
+            <el-table-column prop="status" label="状态" min-width="120" />
             <el-table-column prop="dueAt" label="到期时间" min-width="180" />
             <el-table-column label="操作" min-width="140" fixed="right">
               <template #default="{ row }">
@@ -921,19 +940,131 @@ onMounted(() => {
               </template>
             </el-table-column>
           </el-table>
+          <div class="inline-actions" style="margin-top: 16px">
+            <el-button type="primary" plain @click="openInvoiceWorkbench()">客户账单列表</el-button>
+            <el-button type="warning" plain @click="openInvoiceWorkbench('UNPAID')">待支付账单</el-button>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="支付与退款">
+          <div class="finance-stack">
+            <div class="page-card inner-card">
+              <div class="section-card__head">
+                <strong>支付记录</strong>
+                <span class="section-card__meta">最近 {{ payments.length }} 笔</span>
+              </div>
+              <el-table :data="payments" border stripe empty-text="暂无支付记录">
+                <el-table-column prop="paymentNo" label="支付单号" min-width="180" />
+                <el-table-column label="关联账单" min-width="170">
+                  <template #default="{ row }">
+                    <el-button link type="primary" @click="openInvoiceById(row.invoiceId)">
+                      {{ invoiceNoById(row.invoiceId) }}
+                    </el-button>
+                  </template>
+                </el-table-column>
+                <el-table-column label="渠道" min-width="120">
+                  <template #default="{ row }">
+                    {{ formatPaymentChannel(localeStore.locale, row.channel || "SYSTEM") }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="金额" min-width="120">
+                  <template #default="{ row }">{{ formatWalletMoney(row.amount) }}</template>
+                </el-table-column>
+                <el-table-column label="状态" min-width="120">
+                  <template #default="{ row }">
+                    <el-tag :type="paymentStatusTag(row.status)" effect="light">
+                      {{ paymentStatusLabel(row.status) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="tradeNo" label="交易流水" min-width="180" show-overflow-tooltip />
+                <el-table-column prop="operator" label="登记人" min-width="120" />
+                <el-table-column prop="paidAt" label="支付时间" min-width="170" />
+              </el-table>
+            </div>
+
+            <div class="page-card inner-card">
+              <div class="section-card__head">
+                <strong>退款记录</strong>
+                <span class="section-card__meta">最近 {{ refunds.length }} 笔</span>
+              </div>
+              <el-table :data="refunds" border stripe empty-text="暂无退款记录">
+                <el-table-column prop="refundNo" label="退款单号" min-width="180" />
+                <el-table-column label="关联账单" min-width="170">
+                  <template #default="{ row }">
+                    <el-button link type="primary" @click="openInvoiceById(row.invoiceId)">
+                      {{ invoiceNoById(row.invoiceId) }}
+                    </el-button>
+                  </template>
+                </el-table-column>
+                <el-table-column label="金额" min-width="120">
+                  <template #default="{ row }">{{ formatWalletMoney(row.amount) }}</template>
+                </el-table-column>
+                <el-table-column label="状态" min-width="120">
+                  <template #default="{ row }">
+                    <el-tag :type="refundStatusTag(row.status)" effect="light">
+                      {{ refundStatusLabel(row.status) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="reason" label="退款原因" min-width="240" show-overflow-tooltip />
+                <el-table-column prop="createdAt" label="退款时间" min-width="170" />
+              </el-table>
+            </div>
+
+            <div class="inline-actions">
+              <el-button type="primary" plain @click="openPaymentWorkbench()">查看全部支付</el-button>
+              <el-button type="warning" plain @click="openRefundWorkbench()">查看全部退款</el-button>
+              <el-button plain @click="openRechargeWorkbench()">查看充值记录</el-button>
+              <el-button plain @click="openAdjustmentWorkbench()">查看调整记录</el-button>
+              <el-button @click="openInvoiceWorkbench()">联查客户账单</el-button>
+            </div>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="财务时间线">
+          <div class="page-card inner-card">
+            <div class="section-card__head">
+              <strong>客户财务时间线</strong>
+              <span class="section-card__meta">最近 {{ financeTimeline.length }} 条</span>
+            </div>
+            <el-timeline v-if="financeTimeline.length" class="finance-timeline">
+              <el-timeline-item
+                v-for="item in financeTimeline"
+                :key="item.key"
+                :timestamp="item.occurredAt"
+                :type="item.type"
+                placement="top"
+              >
+                <div class="timeline-card">
+                  <div class="timeline-card__head">
+                    <strong>{{ item.title }}</strong>
+                    <div class="timeline-card__meta">
+                      <el-tag size="small" effect="plain">{{ item.categoryLabel }}</el-tag>
+                      <el-tag size="small" effect="plain">{{ item.referenceNo }}</el-tag>
+                      <el-tag v-if="item.amount !== undefined" :type="item.type" effect="light">
+                        {{ formatWalletMoney(item.amount) }}
+                      </el-tag>
+                    </div>
+                  </div>
+                  <div class="timeline-card__description">{{ item.description }}</div>
+                  <div class="timeline-card__actions">
+                    <el-button link type="primary" @click="openFinanceTimelineTarget(item)">
+                      打开关联记录
+                    </el-button>
+                  </div>
+                </div>
+              </el-timeline-item>
+            </el-timeline>
+            <el-empty v-else description="暂无客户财务时间线" :image-size="72" />
+          </div>
         </el-tab-pane>
 
         <el-tab-pane label="关联工单">
           <el-table :data="tickets" border stripe empty-text="暂无关联工单">
             <el-table-column prop="ticketNo" label="工单编号" min-width="180" />
             <el-table-column prop="title" label="工单标题" min-width="260" />
-            <el-table-column label="状态" min-width="120">
-              <template #default="{ row }">
-                <el-tag :type="ticketStatusTag(row.status)" effect="light">
-                  {{ formatTicketStatusLabel(row.status) }}
-                </el-tag>
-              </template>
-            </el-table-column>
+            <el-table-column prop="status" label="状态" min-width="120" />
             <el-table-column prop="updatedAt" label="更新时间" min-width="180" />
           </el-table>
         </el-tab-pane>
@@ -988,11 +1119,8 @@ onMounted(() => {
   gap: 16px;
 }
 
-.overview-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-  gap: 16px;
-  margin-top: 16px;
+.customer-grid--finance {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .inner-card {
@@ -1022,104 +1150,55 @@ onMounted(() => {
   font-size: 12px;
 }
 
-.signal-grid {
+.finance-stack {
   display: grid;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 16px;
 }
 
-.quick-actions-grid {
+.finance-timeline {
+  padding-top: 8px;
+}
+
+.timeline-card {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 16px;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #dbe5f1;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fff, #f8fbff);
 }
 
-.overview-section + .overview-section {
-  margin-top: 16px;
-}
-
-.overview-section__label {
-  display: block;
-  margin-bottom: 10px;
-  color: #41506b;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.summary-chip-list {
+.timeline-card__head,
+.timeline-card__meta,
+.timeline-card__actions {
   display: flex;
+  align-items: center;
+}
+
+.timeline-card__head,
+.timeline-card__actions {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.timeline-card__meta {
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 16px;
 }
 
-.summary-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: #eef3ff;
-  color: #3056a8;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.summary-chip--muted {
-  background: #f5f7fa;
-  color: #7b8798;
-}
-
-.activity-list {
-  display: grid;
-  gap: 12px;
-}
-
-.activity-card {
-  padding: 14px;
-  border: 1px solid #e5e9f2;
-  border-radius: 14px;
-  background: #fbfcff;
-}
-
-.activity-card__head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.activity-card__value {
-  color: #1f2a3d;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.5;
-}
-
-.activity-card__meta {
-  margin-top: 6px;
-  color: #6b778c;
-  font-size: 12px;
+.timeline-card__description {
+  color: #4f617d;
+  line-height: 1.6;
 }
 
 @media (max-width: 1280px) {
   .customer-grid {
     grid-template-columns: 1fr;
   }
-
-  .overview-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 768px) {
   .customer-form-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .quick-actions-grid {
     grid-template-columns: 1fr;
   }
 }

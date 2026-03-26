@@ -38,6 +38,24 @@ const (
 	PaymentStatusCompleted PaymentStatus = "COMPLETED"
 )
 
+type AccountTransactionType string
+
+const (
+	AccountTransactionTypeRecharge    AccountTransactionType = "RECHARGE"
+	AccountTransactionTypeConsume     AccountTransactionType = "CONSUME"
+	AccountTransactionTypeRefund      AccountTransactionType = "REFUND"
+	AccountTransactionTypeAdjustment  AccountTransactionType = "ADJUSTMENT"
+	AccountTransactionTypeCreditLimit AccountTransactionType = "CREDIT_LIMIT"
+)
+
+type AccountTransactionDirection string
+
+const (
+	AccountTransactionDirectionIn   AccountTransactionDirection = "IN"
+	AccountTransactionDirectionOut  AccountTransactionDirection = "OUT"
+	AccountTransactionDirectionFlat AccountTransactionDirection = "FLAT"
+)
+
 type OrderListFilter struct {
 	Page        int     `json:"page"`
 	Limit       int     `json:"limit"`
@@ -78,6 +96,67 @@ type ServiceListFilter struct {
 	ProviderAccountID int64  `json:"providerAccountId"`
 	SyncStatus        string `json:"syncStatus"`
 	Keyword           string `json:"keyword"`
+}
+
+type AccountTransactionFilter struct {
+	Page            int    `json:"page"`
+	Limit           int    `json:"limit"`
+	Sort            string `json:"sort"`
+	Order           string `json:"order"`
+	CustomerID      int64  `json:"customerId"`
+	TransactionType string `json:"transactionType"`
+	Direction       string `json:"direction"`
+	Channel         string `json:"channel"`
+	Keyword         string `json:"keyword"`
+	StartTime       string `json:"startTime"`
+	EndTime         string `json:"endTime"`
+}
+
+type PaymentListFilter struct {
+	Page       int    `json:"page"`
+	Limit      int    `json:"limit"`
+	Sort       string `json:"sort"`
+	Order      string `json:"order"`
+	CustomerID int64  `json:"customerId"`
+	InvoiceID  int64  `json:"invoiceId"`
+	Keyword    string `json:"keyword"`
+	Channel    string `json:"channel"`
+	Status     string `json:"status"`
+}
+
+type RefundListFilter struct {
+	Page       int    `json:"page"`
+	Limit      int    `json:"limit"`
+	Sort       string `json:"sort"`
+	Order      string `json:"order"`
+	CustomerID int64  `json:"customerId"`
+	InvoiceID  int64  `json:"invoiceId"`
+	Keyword    string `json:"keyword"`
+	Status     string `json:"status"`
+}
+
+type ServiceChangeOrderListFilter struct {
+	Page      int    `json:"page"`
+	Limit     int    `json:"limit"`
+	Sort      string `json:"sort"`
+	Order     string `json:"order"`
+	Status    string `json:"status"`
+	ServiceID int64  `json:"serviceId"`
+	OrderID   int64  `json:"orderId"`
+	InvoiceID int64  `json:"invoiceId"`
+	Action    string `json:"action"`
+	Keyword   string `json:"keyword"`
+}
+
+type WalletAdjustment struct {
+	Target       string  `json:"target"`
+	Operation    string  `json:"operation"`
+	Amount       float64 `json:"amount"`
+	Summary      string  `json:"summary"`
+	Remark       string  `json:"remark"`
+	OperatorType string  `json:"operatorType"`
+	OperatorID   int64   `json:"operatorId"`
+	OperatorName string  `json:"operatorName"`
 }
 
 type ServiceConfigSelection struct {
@@ -262,4 +341,45 @@ type PaymentRecord struct {
 	Status     PaymentStatus `json:"status"`
 	Operator   string        `json:"operator"`
 	PaidAt     string        `json:"paidAt"`
+}
+
+type CustomerWallet struct {
+	CustomerID      int64   `json:"customerId"`
+	CustomerNo      string  `json:"customerNo"`
+	CustomerName    string  `json:"customerName"`
+	Balance         float64 `json:"balance"`
+	CreditLimit     float64 `json:"creditLimit"`
+	CreditUsed      float64 `json:"creditUsed"`
+	AvailableCredit float64 `json:"availableCredit"`
+	UpdatedAt       string  `json:"updatedAt"`
+}
+
+type AccountTransaction struct {
+	ID              int64                       `json:"id"`
+	TransactionNo   string                      `json:"transactionNo"`
+	CustomerID      int64                       `json:"customerId"`
+	CustomerNo      string                      `json:"customerNo"`
+	CustomerName    string                      `json:"customerName"`
+	OrderID         int64                       `json:"orderId"`
+	OrderNo         string                      `json:"orderNo"`
+	InvoiceID       int64                       `json:"invoiceId"`
+	InvoiceNo       string                      `json:"invoiceNo"`
+	PaymentID       int64                       `json:"paymentId"`
+	PaymentNo       string                      `json:"paymentNo"`
+	RefundID        int64                       `json:"refundId"`
+	RefundNo        string                      `json:"refundNo"`
+	TransactionType AccountTransactionType      `json:"transactionType"`
+	Direction       AccountTransactionDirection `json:"direction"`
+	Amount          float64                     `json:"amount"`
+	BalanceBefore   float64                     `json:"balanceBefore"`
+	BalanceAfter    float64                     `json:"balanceAfter"`
+	CreditBefore    float64                     `json:"creditBefore"`
+	CreditAfter     float64                     `json:"creditAfter"`
+	Channel         string                      `json:"channel"`
+	Summary         string                      `json:"summary"`
+	Remark          string                      `json:"remark"`
+	OperatorType    string                      `json:"operatorType"`
+	OperatorID      int64                       `json:"operatorId"`
+	OperatorName    string                      `json:"operatorName"`
+	OccurredAt      string                      `json:"occurredAt"`
 }

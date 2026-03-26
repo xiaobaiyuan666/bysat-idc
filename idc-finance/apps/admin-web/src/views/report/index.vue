@@ -1,30 +1,86 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import {
+  fetchAutomationTasks,
   fetchReportOverview,
+  fetchWorkbenchOverview,
+  type AutomationTask,
   type ReportOverviewResponse,
   type StatusBucket,
-  type TrendPoint
+  type TrendPoint,
+  type WorkbenchResponse
 } from "@/api/admin";
 
-const loading = ref(false);
-const overview = ref<ReportOverviewResponse | null>(null);
+type TodoTab = "identity" | "invoice" | "service" | "ticket";
 
-const revenueMax = computed(() => {
-  if (!overview.value?.revenueTrend.length && !overview.value?.refundTrend.length) return 1;
-  return Math.max(
-    ...[...(overview.value?.revenueTrend ?? []), ...(overview.value?.refundTrend ?? [])].map(item => item.amount),
-    1
-  );
+const router = useRouter();
+const loading = ref(false);
+const activeTodoTab = ref<TodoTab>("identity");
+const reportOverview = ref<ReportOverviewResponse | null>(null);
+const operationsWorkbench = ref<WorkbenchResponse | null>(null);
+const automationAlerts = ref<AutomationTask[]>([]);
+
+const trendMax = computed(() => {
+  const revenue = reportOverview.value?.revenueTrend ?? [];
+  const refund = reportOverview.value?.refundTrend ?? [];
+  return Math.max(...[...revenue, ...refund].map(item => item.amount), 1);
 });
+
+const quickEntries = computed(() => [
+  {
+    key: "identities",
+    label: "待审实名",
+    value: operationsWorkbench.value?.pendingIdentities.length ?? 0,
+    hint: "进入实名审核工作台",
+    tone: "warning",
+    path: "/customer/identities"
+  },
+  {
+    key: "overdue",
+    label: "逾期账单",
+    value: operationsWorkbench.value?.overdueInvoices.length ?? 0,
+    hint: "进入应收与催收处理",
+    tone: "danger",
+    path: "/billing/invoices?status=UNPAID"
+  },
+  {
+    key: "expiring",
+    label: "即将到期服务",
+    value: operationsWorkbench.value?.expiringServices.length ?? 0,
+    hint: "进入续费与到期运营",
+    tone: "warning",
+    path: "/services/list"
+  },
+  {
+    key: "tickets",
+    label: "待跟进工单",
+    value: operationsWorkbench.value?.openTickets.length ?? 0,
+    hint: "进入工单中心",
+    tone: "primary",
+    path: "/tickets/list"
+  },
+  {
+    key: "automation",
+    label: "自动化异常",
+    value: automationAlerts.value.length,
+    hint: "进入自动化任务中心",
+    tone: "danger",
+    path: "/providers/automation?status=FAILED"
+  }
+]);
 
 function formatCurrency(value: number) {
   return `¥${value.toFixed(2)}`;
 }
 
-function barWidth(item: TrendPoint) {
-  return `${Math.max((item.amount / revenueMax.value) * 100, item.amount > 0 ? 10 : 4)}%`;
+function toneClass(tone: string) {
+  return `tone-${tone || "primary"}`;
+}
+
+function trendWidth(item: TrendPoint) {
+  return `${Math.max((item.amount / trendMax.value) * 100, item.amount > 0 ? 10 : 4)}%`;
 }
 
 function ratioWidth(item: StatusBucket, total: number) {
@@ -36,10 +92,62 @@ function totalCount(items: StatusBucket[]) {
   return items.reduce((total, item) => total + item.count, 0);
 }
 
+function statusTagType(status: string) {
+  const normalized = status.toUpperCase();
+  if (normalized === "FAILED") return "danger";
+  if (normalized === "BLOCKED") return "warning";
+  if (normalized === "RUNNING") return "primary";
+  if (normalized === "SUCCESS") return "success";
+  return "info";
+}
+
+function go(path: string) {
+  void router.push(path);
+}
+
+function goCustomerDetail(customerId: number) {
+  void router.push(`/customer/detail/${customerId}`);
+}
+
+function goInvoiceDetail(invoiceId: number) {
+  void router.push(`/billing/invoices/${invoiceId}`);
+}
+
+function goServiceDetail(serviceId: number) {
+  void router.push(`/services/detail/${serviceId}`);
+}
+
+function goTicketDetail(ticketId: number) {
+  void router.push(`/tickets/${ticketId}`);
+}
+
+function goAutomationTask(task: AutomationTask) {
+  const query: Record<string, string> = {
+    status: task.status || "FAILED"
+  };
+  if (task.serviceId) query.serviceId = String(task.serviceId);
+  if (task.orderId) query.orderId = String(task.orderId);
+  if (task.invoiceId) query.invoiceId = String(task.invoiceId);
+  if (task.sourceId) query.sourceId = String(task.sourceId);
+  if (task.sourceType) query.sourceType = task.sourceType;
+  void router.push({ path: "/providers/automation", query });
+}
+
 async function loadOverview() {
   loading.value = true;
   try {
-    overview.value = await fetchReportOverview();
+    const [reportData, workbenchData, failedTasks, blockedTasks] = await Promise.all([
+      fetchReportOverview(),
+      fetchWorkbenchOverview(),
+      fetchAutomationTasks({ status: "FAILED", limit: 6 }),
+      fetchAutomationTasks({ status: "BLOCKED", limit: 6 })
+    ]);
+
+    reportOverview.value = reportData;
+    operationsWorkbench.value = workbenchData;
+    automationAlerts.value = [...failedTasks.items, ...blockedTasks.items]
+      .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+      .slice(0, 8);
   } finally {
     loading.value = false;
   }
@@ -51,17 +159,20 @@ onMounted(loadOverview);
 <template>
   <div v-loading="loading" class="report-page">
     <PageWorkbench
-      eyebrow="功能 / 报表"
-      title="统计报表"
-      subtitle="聚合收款、退款、账单状态、服务结构、支付渠道、账期偏好和客户应收，用于运营与财务复盘。"
+      eyebrow="后台 / 报表中心"
+      title="运营报表中心"
+      subtitle="对照魔方财务的后台视角，把财务走势、待办风险、服务结构、自动化异常和最近系统动作集中到一个运营入口。"
     >
       <template #actions>
+        <el-button @click="go('/billing/invoices')">账单工作台</el-button>
+        <el-button @click="go('/services/list')">服务工作台</el-button>
+        <el-button @click="go('/providers/automation')">自动化任务</el-button>
         <el-button type="primary" @click="loadOverview">刷新报表</el-button>
       </template>
 
       <template #metrics>
         <div class="headline-grid">
-          <div v-for="item in overview?.headline ?? []" :key="item.key" class="headline-card">
+          <div v-for="item in reportOverview?.headline ?? []" :key="item.key" class="headline-card">
             <div class="headline-card__label">{{ item.label }}</div>
             <div class="headline-card__value">{{ item.value }}</div>
             <div class="headline-card__hint">{{ item.hint }}</div>
@@ -69,128 +180,120 @@ onMounted(loadOverview);
         </div>
       </template>
 
-      <div class="sub-grid">
-        <div class="page-card section-card">
-          <div class="page-header">
-            <div>
-              <h2 class="section-title">近 30 日收款趋势</h2>
-              <p class="page-subtitle">按支付流水聚合金额与笔数，反映收款节奏和峰谷。</p>
-            </div>
-          </div>
-          <div class="trend-list">
-            <div v-for="item in overview?.revenueTrend ?? []" :key="item.label" class="trend-item">
-              <div class="trend-item__meta">
-                <strong>{{ item.label }}</strong>
-                <span>{{ formatCurrency(item.amount) }} / {{ item.count }} 笔</span>
-              </div>
-              <div class="trend-item__bar">
-                <span class="trend-item__fill" :style="{ width: barWidth(item) }"></span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="page-card section-card">
-          <div class="page-header">
-            <div>
-              <h2 class="section-title">近 30 日退款趋势</h2>
-              <p class="page-subtitle">按退款单聚合金额与笔数，辅助财务观察退款压力。</p>
-            </div>
-          </div>
-          <div class="trend-list">
-            <div v-for="item in overview?.refundTrend ?? []" :key="item.label" class="trend-item">
-              <div class="trend-item__meta">
-                <strong>{{ item.label }}</strong>
-                <span>{{ formatCurrency(item.amount) }} / {{ item.count }} 笔</span>
-              </div>
-              <div class="trend-item__bar trend-item__bar--warning">
-                <span class="trend-item__fill trend-item__fill--warning" :style="{ width: barWidth(item) }"></span>
-              </div>
-            </div>
-          </div>
-        </div>
+      <div class="quick-grid">
+        <button
+          v-for="item in quickEntries"
+          :key="item.key"
+          type="button"
+          class="quick-card"
+          :class="toneClass(item.tone)"
+          @click="go(item.path)"
+        >
+          <span class="quick-card__label">{{ item.label }}</span>
+          <strong class="quick-card__value">{{ item.value }}</strong>
+          <span class="quick-card__hint">{{ item.hint }}</span>
+        </button>
       </div>
 
       <div class="sub-grid">
         <div class="page-card section-card">
           <div class="page-header">
             <div>
-              <h2 class="section-title">账单与服务结构</h2>
-              <p class="page-subtitle">观察账单状态与服务生命周期的总体分布。</p>
+              <h2 class="section-title">近 30 日收款与退款走势</h2>
+              <p class="page-subtitle">按日观察净收入、退款压力和收款波峰，适合财务与运营复盘。</p>
             </div>
           </div>
+
+          <div class="trend-layout">
+            <div>
+              <div class="block-title">收款趋势</div>
+              <div class="trend-list">
+                <div v-for="item in reportOverview?.revenueTrend ?? []" :key="`revenue-${item.label}`" class="trend-item">
+                  <div class="trend-item__meta">
+                    <strong>{{ item.label }}</strong>
+                    <span>{{ formatCurrency(item.amount) }} / {{ item.count }} 笔</span>
+                  </div>
+                  <div class="trend-item__bar">
+                    <span class="trend-item__fill" :style="{ width: trendWidth(item) }"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="block-title">退款趋势</div>
+              <div class="trend-list">
+                <div v-for="item in reportOverview?.refundTrend ?? []" :key="`refund-${item.label}`" class="trend-item">
+                  <div class="trend-item__meta">
+                    <strong>{{ item.label }}</strong>
+                    <span>{{ formatCurrency(item.amount) }} / {{ item.count }} 笔</span>
+                  </div>
+                  <div class="trend-item__bar trend-item__bar--warning">
+                    <span class="trend-item__fill trend-item__fill--warning" :style="{ width: trendWidth(item) }"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="page-card section-card">
+          <div class="page-header">
+            <div>
+              <h2 class="section-title">财务与服务结构</h2>
+              <p class="page-subtitle">把账单状态、服务状态、支付渠道和账期结构集中展示，方便判断经营质量。</p>
+            </div>
+          </div>
+
           <div class="ratio-panel">
             <div>
               <div class="ratio-title">账单状态</div>
-              <div v-for="item in overview?.invoiceStatus ?? []" :key="item.name" class="ratio-item">
+              <div v-for="item in reportOverview?.invoiceStatus ?? []" :key="`invoice-${item.name}`" class="ratio-item">
                 <div class="ratio-item__meta">
                   <span>{{ item.name }}</span>
                   <span>{{ item.count }} / {{ formatCurrency(item.amount) }}</span>
                 </div>
                 <div class="ratio-item__bar">
-                  <span :style="{ width: ratioWidth(item, totalCount(overview?.invoiceStatus ?? [])) }"></span>
+                  <span :style="{ width: ratioWidth(item, totalCount(reportOverview?.invoiceStatus ?? [])) }"></span>
                 </div>
               </div>
             </div>
 
             <div>
               <div class="ratio-title">服务状态</div>
-              <div v-for="item in overview?.serviceStatus ?? []" :key="item.name" class="ratio-item">
+              <div v-for="item in reportOverview?.serviceStatus ?? []" :key="`service-${item.name}`" class="ratio-item">
                 <div class="ratio-item__meta">
                   <span>{{ item.name }}</span>
                   <span>{{ item.count }} 台</span>
                 </div>
                 <div class="ratio-item__bar ratio-item__bar--success">
-                  <span :style="{ width: ratioWidth(item, totalCount(overview?.serviceStatus ?? [])) }"></span>
+                  <span :style="{ width: ratioWidth(item, totalCount(reportOverview?.serviceStatus ?? [])) }"></span>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
 
-        <div class="page-card section-card">
-          <div class="page-header">
-            <div>
-              <h2 class="section-title">渠道与客户结构</h2>
-              <p class="page-subtitle">看支付渠道、账期偏好和客户分层，便于配置产品与催收策略。</p>
-            </div>
-          </div>
-          <div class="ratio-panel">
             <div>
               <div class="ratio-title">支付渠道</div>
-              <div v-for="item in overview?.paymentChannels ?? []" :key="item.name" class="ratio-item">
+              <div v-for="item in reportOverview?.paymentChannels ?? []" :key="`channel-${item.name}`" class="ratio-item">
                 <div class="ratio-item__meta">
                   <span>{{ item.name }}</span>
                   <span>{{ item.count }} / {{ formatCurrency(item.amount) }}</span>
                 </div>
                 <div class="ratio-item__bar ratio-item__bar--violet">
-                  <span :style="{ width: ratioWidth(item, totalCount(overview?.paymentChannels ?? [])) }"></span>
+                  <span :style="{ width: ratioWidth(item, totalCount(reportOverview?.paymentChannels ?? [])) }"></span>
                 </div>
               </div>
             </div>
 
             <div>
               <div class="ratio-title">账期结构</div>
-              <div v-for="item in overview?.billingCycles ?? []" :key="item.name" class="ratio-item">
+              <div v-for="item in reportOverview?.billingCycles ?? []" :key="`cycle-${item.name}`" class="ratio-item">
                 <div class="ratio-item__meta">
                   <span>{{ item.name }}</span>
                   <span>{{ item.count }} / {{ formatCurrency(item.amount) }}</span>
                 </div>
                 <div class="ratio-item__bar ratio-item__bar--orange">
-                  <span :style="{ width: ratioWidth(item, totalCount(overview?.billingCycles ?? [])) }"></span>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div class="ratio-title">客户分组</div>
-              <div v-for="item in overview?.customerGroups ?? []" :key="item.name" class="ratio-item">
-                <div class="ratio-item__meta">
-                  <span>{{ item.name }}</span>
-                  <span>{{ item.count }} 客户</span>
-                </div>
-                <div class="ratio-item__bar ratio-item__bar--teal">
-                  <span :style="{ width: ratioWidth(item, totalCount(overview?.customerGroups ?? [])) }"></span>
+                  <span :style="{ width: ratioWidth(item, totalCount(reportOverview?.billingCycles ?? [])) }"></span>
                 </div>
               </div>
             </div>
@@ -202,37 +305,154 @@ onMounted(loadOverview);
         <div class="page-card section-card">
           <div class="page-header">
             <div>
-              <h2 class="section-title">热销产品</h2>
-              <p class="page-subtitle">按订单金额聚合的产品排行，可用于销售和活动判断。</p>
+              <h2 class="section-title">营收排行与应收排行</h2>
+              <p class="page-subtitle">先看赚钱的商品，再看应收压力集中的客户，符合魔方财务常用的运营排查路径。</p>
             </div>
           </div>
-          <el-table :data="overview?.topProducts ?? []" border stripe empty-text="暂无产品排行">
-            <el-table-column type="index" label="#" width="60" />
-            <el-table-column prop="name" label="产品名称" min-width="220" />
-            <el-table-column prop="count" label="订单数" min-width="120" />
-            <el-table-column label="累计金额" min-width="160">
-              <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
-            </el-table-column>
-          </el-table>
+
+          <div class="ranking-grid">
+            <div>
+              <div class="block-title">热销商品</div>
+              <el-table :data="reportOverview?.topProducts ?? []" border stripe empty-text="暂无商品排行">
+                <el-table-column type="index" label="#" width="56" />
+                <el-table-column prop="name" label="商品名称" min-width="220" />
+                <el-table-column prop="count" label="订单数" min-width="100" />
+                <el-table-column label="累计金额" min-width="140">
+                  <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <div>
+              <div class="block-title">客户应收排行</div>
+              <el-table :data="reportOverview?.topReceivables ?? []" border stripe empty-text="暂无应收排行">
+                <el-table-column type="index" label="#" width="56" />
+                <el-table-column prop="name" label="客户名称" min-width="220" />
+                <el-table-column prop="count" label="未付账单数" min-width="120" />
+                <el-table-column label="应收金额" min-width="140">
+                  <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
+                </el-table-column>
+                <el-table-column prop="extra" label="最近到期时间" min-width="180" />
+              </el-table>
+            </div>
+          </div>
         </div>
 
         <div class="page-card section-card">
           <div class="page-header">
             <div>
-              <h2 class="section-title">客户应收排行</h2>
-              <p class="page-subtitle">按未支付账单聚合，方便财务催收和客服跟进。</p>
+              <h2 class="section-title">自动化异常</h2>
+              <p class="page-subtitle">把失败和阻塞的自动化任务拉到报表中心，避免只在任务页里被动发现。</p>
             </div>
           </div>
-          <el-table :data="overview?.topReceivables ?? []" border stripe empty-text="暂无应收排行">
-            <el-table-column type="index" label="#" width="60" />
-            <el-table-column prop="name" label="客户名称" min-width="220" />
-            <el-table-column prop="count" label="未付账单数" min-width="120" />
-            <el-table-column label="应收金额" min-width="160">
-              <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
+
+          <el-table :data="automationAlerts" border stripe empty-text="暂无自动化异常">
+            <el-table-column prop="createdAt" label="时间" min-width="170" />
+            <el-table-column prop="title" label="任务标题" min-width="220" />
+            <el-table-column prop="channel" label="渠道" min-width="120" />
+            <el-table-column label="状态" min-width="110">
+              <template #default="{ row }">
+                <el-tag :type="statusTagType(row.status)" effect="light">{{ row.status }}</el-tag>
+              </template>
             </el-table-column>
-            <el-table-column prop="extra" label="最近到期时间" min-width="180" />
+            <el-table-column prop="message" label="结果说明" min-width="240" />
+            <el-table-column label="操作" min-width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button type="primary" link @click="goAutomationTask(row)">查看任务</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </div>
+      </div>
+
+      <div class="page-card section-card">
+        <div class="page-header">
+          <div>
+            <h2 class="section-title">运营待办</h2>
+            <p class="page-subtitle">待审实名、逾期账单、即将到期服务、待跟进工单，统一在这里排查和跳转。</p>
+          </div>
+        </div>
+
+        <el-tabs v-model="activeTodoTab">
+          <el-tab-pane :label="`待审实名 (${operationsWorkbench?.pendingIdentities.length ?? 0})`" name="identity">
+            <el-table :data="operationsWorkbench?.pendingIdentities ?? []" border stripe empty-text="暂无待审实名">
+              <el-table-column prop="customerNo" label="客户编号" min-width="140" />
+              <el-table-column prop="customerName" label="客户名称" min-width="180" />
+              <el-table-column prop="subjectName" label="实名主体" min-width="220" />
+              <el-table-column prop="submittedAt" label="提交时间" min-width="180" />
+              <el-table-column label="操作" min-width="120" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="primary" link @click="goCustomerDetail(row.customerId)">查看客户</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <el-tab-pane :label="`逾期账单 (${operationsWorkbench?.overdueInvoices.length ?? 0})`" name="invoice">
+            <el-table :data="operationsWorkbench?.overdueInvoices ?? []" border stripe empty-text="暂无逾期账单">
+              <el-table-column prop="invoiceNo" label="账单编号" min-width="160" />
+              <el-table-column prop="customerName" label="客户名称" min-width="180" />
+              <el-table-column label="应收金额" min-width="140">
+                <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
+              </el-table-column>
+              <el-table-column prop="dueAt" label="到期时间" min-width="180" />
+              <el-table-column prop="daysOverdue" label="逾期天数" min-width="120" />
+              <el-table-column label="操作" min-width="120" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="primary" link @click="goInvoiceDetail(row.invoiceId)">查看账单</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <el-tab-pane :label="`即将到期服务 (${operationsWorkbench?.expiringServices.length ?? 0})`" name="service">
+            <el-table :data="operationsWorkbench?.expiringServices ?? []" border stripe empty-text="暂无即将到期服务">
+              <el-table-column prop="serviceNo" label="服务编号" min-width="160" />
+              <el-table-column prop="customerName" label="客户名称" min-width="180" />
+              <el-table-column prop="productName" label="商品名称" min-width="220" />
+              <el-table-column prop="status" label="状态" min-width="120" />
+              <el-table-column prop="nextDueAt" label="到期时间" min-width="180" />
+              <el-table-column prop="daysRemaining" label="剩余天数" min-width="120" />
+              <el-table-column label="操作" min-width="120" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="primary" link @click="goServiceDetail(row.serviceId)">查看服务</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <el-tab-pane :label="`待跟进工单 (${operationsWorkbench?.openTickets.length ?? 0})`" name="ticket">
+            <el-table :data="operationsWorkbench?.openTickets ?? []" border stripe empty-text="暂无待跟进工单">
+              <el-table-column prop="ticketNo" label="工单编号" min-width="160" />
+              <el-table-column prop="customerName" label="客户名称" min-width="180" />
+              <el-table-column prop="title" label="工单标题" min-width="260" />
+              <el-table-column prop="status" label="状态" min-width="120" />
+              <el-table-column prop="updatedAt" label="最后更新时间" min-width="180" />
+              <el-table-column label="操作" min-width="120" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="primary" link @click="goTicketDetail(row.ticketId)">查看工单</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+
+      <div class="page-card section-card">
+        <div class="page-header">
+          <div>
+            <h2 class="section-title">最近系统动作</h2>
+            <p class="page-subtitle">直接读取审计日志，方便排查后台最近做过的客户、订单、账单、服务和自动化动作。</p>
+          </div>
+        </div>
+
+        <el-table :data="operationsWorkbench?.recentAudits ?? []" border stripe empty-text="暂无系统动作">
+          <el-table-column prop="createdAt" label="时间" min-width="180" />
+          <el-table-column prop="actor" label="操作人" min-width="140" />
+          <el-table-column prop="action" label="动作" min-width="180" />
+          <el-table-column prop="target" label="目标对象" min-width="180" />
+          <el-table-column prop="description" label="说明" min-width="280" />
+        </el-table>
       </div>
     </PageWorkbench>
   </div>
@@ -244,33 +464,57 @@ onMounted(loadOverview);
   gap: 16px;
 }
 
-.headline-grid {
+.headline-grid,
+.quick-grid,
+.ranking-grid,
+.trend-layout {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
 }
 
-.headline-card {
+.headline-grid,
+.quick-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.ranking-grid,
+.trend-layout {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.headline-card,
+.quick-card {
   border-radius: 16px;
   border: 1px solid #e6edf7;
   background: #fff;
   padding: 16px;
 }
 
-.headline-card__label {
+.quick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+}
+
+.headline-card__label,
+.quick-card__label {
   color: #5e7093;
   font-size: 13px;
 }
 
-.headline-card__value {
-  margin-top: 10px;
+.headline-card__value,
+.quick-card__value {
   font-size: 28px;
   font-weight: 700;
   color: #16376f;
 }
 
-.headline-card__hint {
-  margin-top: 10px;
+.headline-card__hint,
+.quick-card__hint {
   color: #7083a6;
   font-size: 12px;
   line-height: 1.6;
@@ -282,7 +526,7 @@ onMounted(loadOverview);
 
 .trend-list {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .trend-item__meta,
@@ -317,10 +561,11 @@ onMounted(loadOverview);
 
 .ratio-panel {
   display: grid;
-  gap: 20px;
+  gap: 18px;
 }
 
-.ratio-title {
+.ratio-title,
+.block-title {
   margin-bottom: 10px;
   font-weight: 700;
   color: #173b72;
@@ -342,7 +587,19 @@ onMounted(loadOverview);
   background: linear-gradient(90deg, #ea580c 0%, #fb923c 100%);
 }
 
-.ratio-item__bar--teal span {
-  background: linear-gradient(90deg, #0f766e 0%, #2dd4bf 100%);
+.tone-primary {
+  background: linear-gradient(180deg, #f5f9ff 0%, #ffffff 100%);
+}
+
+.tone-success {
+  background: linear-gradient(180deg, #f2fbf6 0%, #ffffff 100%);
+}
+
+.tone-warning {
+  background: linear-gradient(180deg, #fff8ef 0%, #ffffff 100%);
+}
+
+.tone-danger {
+  background: linear-gradient(180deg, #fff5f5 0%, #ffffff 100%);
 }
 </style>

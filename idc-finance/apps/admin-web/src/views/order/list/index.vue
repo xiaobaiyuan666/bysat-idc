@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import StatusTabs from "@/components/workbench/StatusTabs.vue";
@@ -8,13 +8,16 @@ import { downloadCsv } from "@/utils/download";
 import {
   fetchOrders,
   fetchProviderAccounts,
+  updatePendingOrder,
   type OrderQuery,
   type OrderRecord,
   type ProviderAccount
 } from "@/api/admin";
 
 type TabKey = "ALL" | "PENDING" | "ACTIVE" | "COMPLETED" | "CANCELLED";
+type LifecycleStatus = Exclude<TabKey, "ALL">;
 
+const route = useRoute();
 const router = useRouter();
 
 const loading = ref(false);
@@ -24,6 +27,9 @@ const orders = ref<OrderRecord[]>([]);
 const total = ref(0);
 const providerAccounts = ref<ProviderAccount[]>([]);
 const activeTab = ref<TabKey>("ALL");
+const quickActionVisible = ref(false);
+const quickActionLoading = ref(false);
+const quickActionRows = ref<OrderRecord[]>([]);
 
 const pagination = reactive({
   page: 1,
@@ -40,6 +46,11 @@ const filters = reactive({
   payment: "",
   payStatus: "",
   dateRange: [] as string[]
+});
+
+const quickActionForm = reactive({
+  status: "ACTIVE" as LifecycleStatus,
+  reason: ""
 });
 
 const paymentOptions = [
@@ -70,6 +81,15 @@ const paidCount = computed(() => orders.value.filter(item => item.payStatus === 
 const unpaidCount = computed(() => orders.value.filter(item => item.payStatus === "UNPAID").length);
 const refundedCount = computed(() => orders.value.filter(item => item.payStatus === "REFUNDED").length);
 const automatedCount = computed(() => orders.value.filter(item => item.automationType !== "LOCAL").length);
+const quickActionTargetCount = computed(() => quickActionRows.value.length);
+const quickActionStatusLabel = computed(() => statusLabel(quickActionForm.status));
+
+const lifecycleActionOptions = [
+  { label: "转待支付", value: "PENDING" as LifecycleStatus },
+  { label: "转待开通", value: "ACTIVE" as LifecycleStatus },
+  { label: "标记完成", value: "COMPLETED" as LifecycleStatus },
+  { label: "标记取消", value: "CANCELLED" as LifecycleStatus }
+];
 
 function buildQuery(): OrderQuery {
   const query: OrderQuery = {
@@ -117,7 +137,7 @@ function resetFilters() {
   filters.payStatus = "";
   filters.dateRange = [];
   pagination.page = 1;
-  void loadOrders();
+  void router.push({ path: "/orders/list", query: {} });
 }
 
 function applyFilters() {
@@ -220,6 +240,120 @@ function payStatusTagType(status: string) {
   return "warning";
 }
 
+function defaultReasonForStatus(status: LifecycleStatus) {
+  const mapping: Record<LifecycleStatus, string> = {
+    PENDING: "后台回退为待支付，等待重新收款或人工复核",
+    ACTIVE: "后台确认订单进入待开通流程",
+    COMPLETED: "后台确认订单已完成交付",
+    CANCELLED: "后台关闭订单并终止后续交付"
+  };
+  return mapping[status];
+}
+
+function openCustomerWorkbench(row: OrderRecord) {
+  void router.push(`/customer/detail/${row.customerId}`);
+}
+
+function openAutomationWorkbench(row: OrderRecord) {
+  void router.push({
+    path: "/providers/automation",
+    query: {
+      orderId: String(row.id),
+      channel: row.automationType || undefined
+    }
+  });
+}
+
+function openQuickAction(status: LifecycleStatus, rows?: OrderRecord[]) {
+  const targets = rows && rows.length > 0 ? rows : selectedRows.value;
+  if (targets.length === 0) {
+    ElMessage.info("请先选择订单");
+    return;
+  }
+  quickActionRows.value = [...targets];
+  quickActionForm.status = status;
+  quickActionForm.reason = defaultReasonForStatus(status);
+  quickActionVisible.value = true;
+}
+
+async function submitQuickAction() {
+  if (quickActionRows.value.length === 0) return;
+  quickActionLoading.value = true;
+  let success = 0;
+  const failed: OrderRecord[] = [];
+  try {
+    for (const row of quickActionRows.value) {
+      try {
+        await updatePendingOrder(row.id, {
+          status: quickActionForm.status,
+          reason: quickActionForm.reason.trim() || defaultReasonForStatus(quickActionForm.status)
+        });
+        success += 1;
+      } catch {
+        failed.push(row);
+      }
+    }
+    if (success > 0) {
+      ElMessage.success(
+        failed.length > 0
+          ? `已处理 ${success} 条订单，失败 ${failed.length} 条`
+          : `已将 ${success} 条订单更新为${quickActionStatusLabel.value}`
+      );
+    } else {
+      ElMessage.error("订单状态处理失败");
+    }
+    if (failed.length > 0) {
+      quickActionRows.value = failed;
+      quickActionForm.reason = `${quickActionForm.reason.trim()}\n失败订单：${failed.map(item => item.orderNo).join("、")}`.trim();
+    } else {
+      quickActionVisible.value = false;
+      quickActionRows.value = [];
+      selectedRows.value = [];
+      await loadOrders();
+    }
+  } finally {
+    quickActionLoading.value = false;
+    if (failed.length > 0) {
+      await loadOrders();
+    }
+  }
+}
+
+function closeQuickAction() {
+  quickActionVisible.value = false;
+  quickActionRows.value = [];
+  quickActionForm.reason = "";
+}
+
+function handleRowAction(row: OrderRecord, command: string) {
+  switch (command) {
+    case "customer":
+      openCustomerWorkbench(row);
+      return;
+    case "tasks":
+      openAutomationWorkbench(row);
+      return;
+    case "pending":
+      openQuickAction("PENDING", [row]);
+      return;
+    case "active":
+      openQuickAction("ACTIVE", [row]);
+      return;
+    case "completed":
+      openQuickAction("COMPLETED", [row]);
+      return;
+    case "cancelled":
+      openQuickAction("CANCELLED", [row]);
+      return;
+    default:
+      return;
+  }
+}
+
+function handleRowDropdownCommand(row: OrderRecord, command: string | number | object) {
+  handleRowAction(row, String(command));
+}
+
 async function copySelectedOrderNos() {
   if (selectedRows.value.length === 0) {
     ElMessage.info("请先选择订单");
@@ -281,7 +415,29 @@ function openDetail(row: OrderRecord) {
   void router.push(`/orders/detail/${row.id}`);
 }
 
+function readRouteQueryValue(value: unknown) {
+  if (Array.isArray(value)) return String(value[0] ?? "");
+  if (value === undefined || value === null) return "";
+  return String(value);
+}
+
+function syncFiltersFromRoute() {
+  const status = readRouteQueryValue(route.query.status).toUpperCase();
+  activeTab.value = (status as TabKey) || "ALL";
+  filters.orderNo = readRouteQueryValue(route.query.orderNo || route.query.ordernum);
+  filters.productName = readRouteQueryValue(route.query.productName || route.query.product_name);
+  filters.customerId = readRouteQueryValue(route.query.customerId || route.query.uid);
+  filters.amount = readRouteQueryValue(route.query.amount);
+  filters.payment = readRouteQueryValue(route.query.payment).toUpperCase();
+  filters.payStatus = readRouteQueryValue(route.query.payStatus || route.query.pay_status).toUpperCase();
+  const startTime = readRouteQueryValue(route.query.start_time);
+  const endTime = readRouteQueryValue(route.query.end_time);
+  filters.dateRange = startTime && endTime ? [startTime, endTime] : [];
+  pagination.page = 1;
+}
+
 onMounted(() => {
+  syncFiltersFromRoute();
   void loadOrders();
 });
 
@@ -289,6 +445,14 @@ watch(activeTab, () => {
   pagination.page = 1;
   void loadOrders();
 });
+
+watch(
+  () => route.fullPath,
+  () => {
+    syncFiltersFromRoute();
+    void loadOrders();
+  }
+);
 </script>
 
 <template>
@@ -296,7 +460,7 @@ watch(activeTab, () => {
     <PageWorkbench
       eyebrow="业务 / 订单"
       title="产品订单"
-      subtitle="按照魔方财务的订单列表逻辑，统一查看订单、支付、自动化渠道和接口账户。"
+      subtitle="按照魔方财务的订单列表逻辑，统一查看订单、支付、自动化渠道、接口账户和后台处置动作。"
     >
       <template #actions>
         <el-button @click="loadOrders">刷新列表</el-button>
@@ -373,6 +537,10 @@ watch(activeTab, () => {
           <span>已选 {{ selectedRows.length }} 条</span>
         </div>
         <div class="action-group">
+          <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('PENDING')">转待支付</el-button>
+          <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('ACTIVE')">转待开通</el-button>
+          <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('COMPLETED')">标记完成</el-button>
+          <el-button plain :disabled="selectedRows.length === 0" @click="openQuickAction('CANCELLED')">标记取消</el-button>
           <el-button plain @click="copySelectedOrderNos">复制订单号</el-button>
           <el-button plain @click="exportSelected">导出选中</el-button>
           <el-button plain @click="exportCurrent">导出当前页</el-button>
@@ -417,9 +585,26 @@ watch(activeTab, () => {
           </template>
         </el-table-column>
         <el-table-column prop="createdAt" label="创建时间" min-width="180" />
-        <el-table-column label="操作" min-width="120" fixed="right">
+        <el-table-column label="操作" min-width="260" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link @click="openDetail(row)">进入工作台</el-button>
+            <div class="inline-actions">
+              <el-button type="primary" link @click="openDetail(row)">进入工作台</el-button>
+              <el-button type="primary" link @click="openCustomerWorkbench(row)">客户</el-button>
+              <el-dropdown @command="handleRowDropdownCommand(row, $event)">
+                <el-button type="primary" link>
+                  更多
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="tasks">任务中心</el-dropdown-item>
+                    <el-dropdown-item command="pending">转待支付</el-dropdown-item>
+                    <el-dropdown-item command="active">转待开通</el-dropdown-item>
+                    <el-dropdown-item command="completed">标记完成</el-dropdown-item>
+                    <el-dropdown-item command="cancelled">标记取消</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -437,6 +622,41 @@ watch(activeTab, () => {
         />
       </div>
     </PageWorkbench>
+
+    <el-dialog v-model="quickActionVisible" title="订单批量处置" width="520px" @closed="closeQuickAction">
+      <el-form label-position="top">
+        <el-alert
+          :title="`即将把 ${quickActionTargetCount} 条订单更新为${quickActionStatusLabel}`"
+          description="这个动作会调用订单人工调整链路，并写入审计记录；如果订单已挂服务，后续交付状态也会跟着回写。"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+        <el-form-item label="目标状态">
+          <el-select v-model="quickActionForm.status" style="width: 100%">
+            <el-option v-for="item in lifecycleActionOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="变更原因">
+          <el-input
+            v-model="quickActionForm.reason"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入后台处理原因，客户改单、人工收款、取消关闭等都应记录清楚"
+          />
+        </el-form-item>
+        <el-form-item label="本次涉及订单">
+          <div class="table-toolbar__meta" style="line-height: 1.8">
+            <span v-for="item in quickActionRows" :key="item.id">{{ item.orderNo }} / {{ item.customerName }}</span>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeQuickAction">取消</el-button>
+        <el-button type="primary" :loading="quickActionLoading" @click="submitQuickAction">确认处置</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 

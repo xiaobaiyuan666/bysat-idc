@@ -8,11 +8,15 @@ import ContextTabs from "@/components/workbench/ContextTabs.vue";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import { useLocaleStore } from "@/store";
 import {
+  fetchAccountTransactions,
   fetchInvoiceDetail,
   fetchProviderAccounts,
+  fetchCustomerWallet,
   receiveInvoicePayment,
   refundInvoice,
   updateUnpaidInvoice,
+  type AccountTransactionRecord,
+  type CustomerWalletResponse,
   type InvoiceDetailResponse,
   type ProviderAccount
 } from "@/api/admin";
@@ -30,18 +34,36 @@ import {
   invoiceStatusOptions as createInvoiceStatusOptions
 } from "@/utils/business";
 
+interface FinanceTimelineItem {
+  key: string;
+  time: string;
+  title: string;
+  description: string;
+  amount?: number;
+  tag?: string;
+  tagType?: "primary" | "success" | "warning" | "info" | "danger";
+  linkType?: "payments" | "refunds" | "accounts" | "service";
+  linkId?: number;
+  linkKeyword?: string;
+  linkLabel?: string;
+}
+
 const route = useRoute();
 const router = useRouter();
 const localeStore = useLocaleStore();
 
 const loading = ref(false);
+const financeLoading = ref(false);
 const receiving = ref(false);
 const refunding = ref(false);
 const savingEdit = ref(false);
 const receiveDialogVisible = ref(false);
 const editDialogVisible = ref(false);
+const activeTab = ref("0");
 const detail = ref<InvoiceDetailResponse | null>(null);
 const providerAccounts = ref<ProviderAccount[]>([]);
+const receiveWallet = ref<CustomerWalletResponse | null>(null);
+const invoiceTransactions = ref<AccountTransactionRecord[]>([]);
 const billingCycles = computed(() => createBillingCycleOptions(localeStore.locale));
 const invoiceStatusOptions = computed(() => createInvoiceStatusOptions(localeStore.locale));
 const _legacyBillingCycles = [
@@ -73,11 +95,20 @@ const editForm = reactive({
 });
 
 const customerId = computed(() => detail.value?.invoice.customerId ?? detail.value?.order?.customerId ?? 0);
+const customerDisplayName = computed(() => {
+  if (receiveWallet.value?.wallet.customerName) return receiveWallet.value.wallet.customerName;
+  if (detail.value?.order?.customerName) return detail.value.order.customerName;
+  return customerId.value ? `客户 #${customerId.value}` : "-";
+});
 const invoiceAccount = computed(() => {
   const accountId = detail.value?.order?.providerAccountId || detail.value?.services[0]?.providerAccountId || 0;
   if (!accountId) return null;
   return providerAccounts.value.find(item => item.id === accountId) ?? null;
 });
+const totalPaid = computed(() => detail.value?.payments.reduce((sum, item) => sum + item.amount, 0) ?? 0);
+const totalRefunded = computed(() => detail.value?.refunds.reduce((sum, item) => sum + item.amount, 0) ?? 0);
+const netReceived = computed(() => totalPaid.value - totalRefunded.value);
+const ledgerPreview = computed(() => invoiceTransactions.value.slice(0, 6));
 const invoiceEditImpact = computed(() => {
   switch (editForm.status) {
     case "PAID":
@@ -99,6 +130,42 @@ const invoiceEditImpact = computed(() => {
         description: "系统会把订单回退为待处理，并将关联服务改为挂起状态。"
       };
   }
+});
+const receiveBalanceInsufficient = computed(() => {
+  if (receiveForm.channel !== "BALANCE" || !detail.value || !receiveWallet.value) return false;
+  return receiveWallet.value.wallet.balance+0.00001 < detail.value.invoice.totalAmount;
+});
+const receiveHint = computed(() => {
+  if (!detail.value) {
+    return {
+      title: "请选择收款渠道",
+      description: "系统会按选择的渠道登记收款并联动账单、订单和服务状态。",
+      type: "info" as const
+    };
+  }
+
+  if (receiveForm.channel === "BALANCE") {
+    const balance = receiveWallet.value
+      ? formatCurrency(receiveWallet.value.wallet.balance)
+      : "加载中";
+    return receiveBalanceInsufficient.value
+      ? {
+          title: "客户余额不足",
+          description: `账单金额 ${formatCurrency(detail.value.invoice.totalAmount)}，当前钱包余额 ${balance}。请先到资金台账充值，或改用其他收款渠道。`,
+          type: "warning" as const
+        }
+      : {
+          title: "将使用客户余额直接抵扣",
+          description: `账单金额 ${formatCurrency(detail.value.invoice.totalAmount)}，当前钱包余额 ${balance}。确认后会生成一笔余额支付记录。`,
+          type: "success" as const
+        };
+  }
+
+  return {
+    title: "将登记外部收款",
+    description: `账单金额 ${formatCurrency(detail.value.invoice.totalAmount)}。系统会生成支付记录，并联动订单和服务状态。`,
+    type: "info" as const
+  };
 });
 
 const contextTabs = computed(() => [
@@ -207,14 +274,285 @@ function changeOrderExecutionType(status: string) {
   return mapping[status] ?? "info";
 }
 
+function formatSignedAmount(value: number) {
+  if (value > 0) return `+${formatCurrency(value)}`;
+  if (value < 0) return `-${formatCurrency(Math.abs(value))}`;
+  return formatCurrency(0);
+}
+
+function paymentSourceLabel(source: string) {
+  const mapping: Record<string, string> = {
+    PORTAL: "客户中心",
+    ADMIN: "后台补录",
+    SYSTEM: "系统联动"
+  };
+  return mapping[source] ?? source;
+}
+
+function refundStatusLabel(status: string) {
+  const mapping: Record<string, string> = {
+    COMPLETED: "已退款"
+  };
+  return mapping[status] ?? status;
+}
+
+function refundStatusType(status: string) {
+  const mapping: Record<string, string> = {
+    COMPLETED: "warning"
+  };
+  return mapping[status] ?? "info";
+}
+
+function directionLabel(direction: string) {
+  const mapping: Record<string, string> = {
+    IN: "收入",
+    OUT: "支出",
+    FLAT: "平移"
+  };
+  return mapping[direction] ?? direction;
+}
+
+function directionTag(direction: string) {
+  const mapping: Record<string, string> = {
+    IN: "success",
+    OUT: "danger",
+    FLAT: "info"
+  };
+  return mapping[direction] ?? "info";
+}
+
+function transactionTypeLabel(type: string) {
+  const mapping: Record<string, string> = {
+    RECHARGE: "充值入账",
+    CONSUME: "余额消费",
+    REFUND: "退款回退",
+    ADJUSTMENT: "人工调整",
+    CREDIT_LIMIT: "授信调整"
+  };
+  return mapping[type] ?? type;
+}
+
+function providerAccountLabel(accountId: number) {
+  if (!accountId) return "未绑定";
+  const account = providerAccounts.value.find(item => item.id === accountId);
+  return account ? `${account.name} / ${account.baseUrl}` : "未绑定";
+}
+
+function parseTimelineTime(value: string) {
+  if (!value) return 0;
+  const parsed = Date.parse(value.includes("T") ? value : value.replace(" ", "T"));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function openCustomerWorkbench() {
+  if (!customerId.value) return;
+  void router.push(`/customer/detail/${customerId.value}`);
+}
+
+function openOrderWorkbench() {
+  if (!detail.value?.order) return;
+  void router.push(`/orders/detail/${detail.value.order.id}`);
+}
+
+function openServiceWorkbench(serviceId?: number) {
+  const id = serviceId || detail.value?.services[0]?.id;
+  if (!id) return;
+  void router.push(`/services/detail/${id}`);
+}
+
+function openPaymentsWorkbench(keyword?: string) {
+  if (!detail.value?.invoice.id) return;
+  void router.push({
+    path: "/billing/payments",
+    query: {
+      customerId: customerId.value || undefined,
+      invoiceId: detail.value.invoice.id,
+      keyword: keyword || undefined
+    }
+  });
+}
+
+function openRefundsWorkbench(keyword?: string) {
+  if (!detail.value?.invoice.id) return;
+  void router.push({
+    path: "/billing/refunds",
+    query: {
+      customerId: customerId.value || undefined,
+      invoiceId: detail.value.invoice.id,
+      keyword: keyword || undefined
+    }
+  });
+}
+
+function openAccountsWorkbench(options?: {
+  action?: "recharge" | "deduct" | "credit";
+  transactionType?: string;
+  keyword?: string;
+}) {
+  if (!customerId.value) return;
+  void router.push({
+    path: "/billing/accounts",
+    query: {
+      customerId: customerId.value,
+      keyword: options?.keyword || detail.value?.invoice.invoiceNo || undefined,
+      transactionType: options?.transactionType,
+      action: options?.action
+    }
+  });
+}
+
+function openFinanceTimelineTarget(item: FinanceTimelineItem) {
+  switch (item.linkType) {
+    case "payments":
+      openPaymentsWorkbench(item.linkKeyword);
+      return;
+    case "refunds":
+      openRefundsWorkbench(item.linkKeyword);
+      return;
+    case "accounts":
+      openAccountsWorkbench({ keyword: item.linkKeyword });
+      return;
+    case "service":
+      openServiceWorkbench(item.linkId);
+      return;
+    default:
+      return;
+  }
+}
+
+const financeTimeline = computed<FinanceTimelineItem[]>(() => {
+  if (!detail.value) return [];
+
+  const items: FinanceTimelineItem[] = [
+    {
+      key: `invoice-${detail.value.invoice.id}`,
+      time: detail.value.invoice.paidAt || detail.value.invoice.dueAt,
+      title: `账单状态：${formatInvoiceStatus(detail.value.invoice.status)}`,
+      description: `账单金额 ${formatCurrency(detail.value.invoice.totalAmount)}，支付 ${formatCurrency(totalPaid.value)}，退款 ${formatCurrency(totalRefunded.value)}。`,
+      tag: detail.value.invoice.invoiceNo,
+      tagType: invoiceStatusType(detail.value.invoice.status) as FinanceTimelineItem["tagType"],
+      linkType: "accounts",
+      linkKeyword: detail.value.invoice.invoiceNo,
+      linkLabel: "查看资金台账"
+    }
+  ];
+
+  detail.value.payments.forEach(payment => {
+    items.push({
+      key: `payment-${payment.id}`,
+      time: payment.paidAt,
+      title: `支付入账 ${payment.paymentNo}`,
+      description: `渠道 ${paymentChannelLabel(payment.channel)}，来源 ${paymentSourceLabel(payment.source)}${payment.tradeNo ? `，交易号 ${payment.tradeNo}` : ""}。`,
+      amount: payment.amount,
+      tag: payment.status,
+      tagType: "success",
+      linkType: "payments",
+      linkKeyword: payment.paymentNo,
+      linkLabel: "查看支付记录"
+    });
+  });
+
+  detail.value.refunds.forEach(refund => {
+    items.push({
+      key: `refund-${refund.id}`,
+      time: refund.createdAt,
+      title: `退款完成 ${refund.refundNo}`,
+      description: refund.reason || "已生成退款记录。",
+      amount: refund.amount * -1,
+      tag: refundStatusLabel(refund.status),
+      tagType: refundStatusType(refund.status) as FinanceTimelineItem["tagType"],
+      linkType: "refunds",
+      linkKeyword: refund.refundNo,
+      linkLabel: "查看退款记录"
+    });
+  });
+
+  invoiceTransactions.value.forEach(transaction => {
+    const signedAmount =
+      transaction.direction === "OUT" ? transaction.amount * -1 : transaction.direction === "FLAT" ? 0 : transaction.amount;
+    items.push({
+      key: `ledger-${transaction.id}`,
+      time: transaction.occurredAt,
+      title: `台账流水 ${transaction.transactionNo}`,
+      description: `${transactionTypeLabel(transaction.transactionType)} / ${directionLabel(transaction.direction)} / 变更后余额 ${formatCurrency(transaction.balanceAfter)}`,
+      amount: signedAmount,
+      tag: transaction.operatorName || transaction.channel || "系统",
+      tagType: directionTag(transaction.direction) as FinanceTimelineItem["tagType"],
+      linkType: "accounts",
+      linkKeyword: transaction.paymentNo || transaction.refundNo || transaction.transactionNo,
+      linkLabel: "打开资金台账"
+    });
+  });
+
+  detail.value.services.slice(0, 3).forEach(service => {
+    items.push({
+      key: `service-${service.id}`,
+      time: service.updatedAt || service.lastSyncAt || service.createdAt,
+      title: `服务联动 ${service.serviceNo}`,
+      description: `当前状态 ${formatServiceStatus(localeStore.locale, service.status)}，下次续费 ${service.nextDueAt || "-"}`,
+      tag: formatProviderType(localeStore.locale, service.providerType),
+      tagType: "primary",
+      linkType: "service",
+      linkId: service.id,
+      linkLabel: "打开服务详情"
+    });
+  });
+
+  return items.sort((left, right) => parseTimelineTime(right.time) - parseTimelineTime(left.time));
+});
+
 async function loadProviderAccounts() {
   providerAccounts.value = await fetchProviderAccounts();
+}
+
+async function loadReceiveWallet() {
+  if (!detail.value?.invoice.customerId) {
+    receiveWallet.value = null;
+    return;
+  }
+  receiveWallet.value = await fetchCustomerWallet(detail.value.invoice.customerId);
+}
+
+async function loadInvoiceTransactions() {
+  if (!detail.value?.invoice.customerId || !detail.value.invoice.invoiceNo) {
+    invoiceTransactions.value = [];
+    return;
+  }
+
+  const paymentIds = new Set(detail.value.payments.map(item => item.id));
+  const refundIds = new Set(detail.value.refunds.map(item => item.id));
+  const response = await fetchAccountTransactions({
+    page: 1,
+    limit: 50,
+    customerId: detail.value.invoice.customerId,
+    keyword: detail.value.invoice.invoiceNo,
+    sort: "occurred_at",
+    order: "desc"
+  });
+
+  invoiceTransactions.value = response.items.filter(item => {
+    if (item.invoiceId === detail.value?.invoice.id) return true;
+    if (item.invoiceNo === detail.value?.invoice.invoiceNo) return true;
+    if (item.paymentId > 0 && paymentIds.has(item.paymentId)) return true;
+    if (item.refundId > 0 && refundIds.has(item.refundId)) return true;
+    return false;
+  });
+}
+
+async function loadFinanceContext() {
+  financeLoading.value = true;
+  try {
+    await Promise.allSettled([loadReceiveWallet(), loadInvoiceTransactions()]);
+  } finally {
+    financeLoading.value = false;
+  }
 }
 
 async function loadDetail() {
   loading.value = true;
   try {
     detail.value = await fetchInvoiceDetail(route.params.id as string);
+    await loadFinanceContext();
   } finally {
     loading.value = false;
   }
@@ -245,6 +583,7 @@ async function submitInvoiceEdit() {
     });
     detail.value = result;
     editDialogVisible.value = false;
+    await loadFinanceContext();
     ElMessage.success("账单和关联订单已更新，变更记录已写入审计");
   } finally {
     savingEdit.value = false;
@@ -263,8 +602,8 @@ async function submitReceivePayment() {
     receiveForm.tradeNo = "";
     ElMessage.success(
       result.service
-        ? `收款成功，支付单 ${result.payment.paymentNo} 已生成，服务 ${result.service.serviceNo} 已联动处理`
-        : `收款成功，支付单 ${result.payment.paymentNo} 已生成`
+        ? `收款成功，支付单 ${result.payment.paymentNo} 已生成，渠道 ${paymentChannelLabel(result.payment.channel)}，服务 ${result.service.serviceNo} 已联动处理`
+        : `收款成功，支付单 ${result.payment.paymentNo} 已生成，渠道 ${paymentChannelLabel(result.payment.channel)}`
     );
     await loadDetail();
   } finally {
@@ -300,7 +639,19 @@ async function handleRefund() {
   }
 }
 
-watch(() => route.params.id, () => void loadDetail());
+watch(() => route.params.id, () => {
+  activeTab.value = "0";
+  void loadDetail();
+});
+watch(receiveDialogVisible, visible => {
+  if (!visible) {
+    receiveForm.tradeNo = "";
+    return;
+  }
+  if (!receiveWallet.value) {
+    void loadReceiveWallet();
+  }
+});
 
 onMounted(async () => {
   await Promise.all([loadProviderAccounts(), loadDetail()]);
@@ -308,7 +659,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div v-loading="loading">
+  <div v-loading="loading || financeLoading">
     <PageWorkbench
       eyebrow="财务 / 账单"
       title="账单工作台"
@@ -317,6 +668,7 @@ onMounted(async () => {
       <template #actions>
         <el-button @click="router.push('/billing/invoices')">返回列表</el-button>
         <el-button @click="loadDetail">刷新详情</el-button>
+        <el-button v-if="detail" plain @click="openCustomerWorkbench">客户工作台</el-button>
         <el-button v-if="detail" type="primary" plain @click="openEditDialog">
           人工调整账单
         </el-button>
@@ -352,11 +704,15 @@ onMounted(async () => {
             <span class="detail-kpi-card__label">到期时间</span>
             <strong class="detail-kpi-card__value">{{ detail.invoice.dueAt }}</strong>
           </div>
+          <div class="detail-kpi-card">
+            <span class="detail-kpi-card__label">净入账</span>
+            <strong class="detail-kpi-card__value">{{ formatCurrency(netReceived) }}</strong>
+          </div>
         </div>
       </template>
 
       <template v-if="detail">
-        <el-tabs>
+        <el-tabs v-model="activeTab">
           <el-tab-pane label="账单概览">
             <div class="portal-grid portal-grid--two">
               <div class="panel-card">
@@ -402,6 +758,94 @@ onMounted(async () => {
                 />
               </div>
             </div>
+
+            <div class="summary-strip" style="margin: 16px 0">
+              <div class="summary-pill">
+                <span>台账流水</span>
+                <strong>{{ invoiceTransactions.length }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>净入账</span>
+                <strong>{{ formatCurrency(netReceived) }}</strong>
+              </div>
+              <div class="summary-pill">
+                <span>客户余额</span>
+                <strong>{{ receiveWallet ? formatCurrency(receiveWallet.wallet.balance) : "-" }}</strong>
+              </div>
+            </div>
+
+            <div class="inline-actions" style="margin-bottom: 16px">
+              <el-button type="primary" link @click="openPaymentsWorkbench">查看支付工作台</el-button>
+              <el-button type="primary" link @click="openRefundsWorkbench">查看退款工作台</el-button>
+              <el-button type="primary" link @click="openAccountsWorkbench">查看资金台账</el-button>
+              <el-button type="primary" link @click="openAccountsWorkbench({ action: 'recharge' })">线下充值</el-button>
+            </div>
+
+            <div class="portal-grid portal-grid--two">
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>客户资金概览</strong>
+                  <span class="section-card__meta">{{ customerDisplayName }}</span>
+                </div>
+                <el-descriptions :column="2" border>
+                  <el-descriptions-item label="钱包余额">
+                    {{ receiveWallet ? formatCurrency(receiveWallet.wallet.balance) : "-" }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="可用授信">
+                    {{ receiveWallet ? formatCurrency(receiveWallet.wallet.availableCredit) : "-" }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="授信额度">
+                    {{ receiveWallet ? formatCurrency(receiveWallet.wallet.creditLimit) : "-" }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="已用授信">
+                    {{ receiveWallet ? formatCurrency(receiveWallet.wallet.creditUsed) : "-" }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="更新时间" :span="2">
+                    {{ receiveWallet?.wallet.updatedAt || "-" }}
+                  </el-descriptions-item>
+                </el-descriptions>
+              </div>
+
+              <div class="panel-card">
+                <div class="section-card__head">
+                  <strong>账单台账流水</strong>
+                  <span class="section-card__meta">已按账单号联查</span>
+                </div>
+                <el-table :data="ledgerPreview" size="small" border stripe empty-text="暂无关联台账流水">
+                  <el-table-column prop="transactionNo" label="流水号" min-width="160" />
+                  <el-table-column label="类型" min-width="140">
+                    <template #default="{ row }">
+                      <div>{{ transactionTypeLabel(row.transactionType) }}</div>
+                      <el-tag :type="directionTag(row.direction)" effect="light" size="small">
+                        {{ directionLabel(row.direction) }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="金额" min-width="120">
+                    <template #default="{ row }">
+                      {{ formatSignedAmount(row.direction === 'OUT' ? row.amount * -1 : row.direction === 'FLAT' ? 0 : row.amount) }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="变更后余额" min-width="120">
+                    <template #default="{ row }">{{ formatCurrency(row.balanceAfter) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="occurredAt" label="发生时间" min-width="180" />
+                  <el-table-column label="操作" min-width="160" fixed="right">
+                    <template #default="{ row }">
+                      <div class="inline-actions">
+                        <el-button
+                          type="primary"
+                          link
+                          @click="openAccountsWorkbench({ keyword: row.paymentNo || row.refundNo || row.transactionNo })"
+                        >
+                          精确联查
+                        </el-button>
+                      </div>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+            </div>
           </el-tab-pane>
 
           <el-tab-pane label="关联订单">
@@ -412,13 +856,13 @@ onMounted(async () => {
               <el-descriptions-item label="订单状态">{{ formatOrderStatus(localeStore.locale, detail.order.status) }}</el-descriptions-item>
               <el-descriptions-item label="自动化渠道">{{ formatProviderType(localeStore.locale, detail.order.automationType) }}</el-descriptions-item>
               <el-descriptions-item label="接口账户">
-                {{ invoiceAccount ? `${invoiceAccount.name} / ${invoiceAccount.baseUrl}` : "未绑定" }}
+                {{ providerAccountLabel(detail.order.providerAccountId) }}
               </el-descriptions-item>
               <el-descriptions-item label="订单金额">{{ formatCurrency(detail.order.amount) }}</el-descriptions-item>
               <el-descriptions-item label="创建时间">{{ detail.order.createdAt }}</el-descriptions-item>
             </el-descriptions>
             <div class="inline-actions" style="margin-top: 16px">
-              <el-button v-if="detail.order" type="primary" link @click="router.push(`/orders/detail/${detail.order.id}`)">
+              <el-button v-if="detail.order" type="primary" link @click="openOrderWorkbench">
                 打开订单详情
               </el-button>
             </div>
@@ -448,11 +892,59 @@ onMounted(async () => {
             </el-descriptions>
           </el-tab-pane>
 
+          <el-tab-pane label="财务时间线">
+            <div class="inline-actions" style="margin-bottom: 16px">
+              <el-button type="primary" link @click="openPaymentsWorkbench">支付记录</el-button>
+              <el-button type="primary" link @click="openRefundsWorkbench">退款记录</el-button>
+              <el-button type="primary" link @click="openAccountsWorkbench">资金台账</el-button>
+              <el-button type="primary" link @click="openCustomerWorkbench">客户工作台</el-button>
+            </div>
+            <el-timeline v-if="financeTimeline.length">
+              <el-timeline-item
+                v-for="item in financeTimeline"
+                :key="item.key"
+                :timestamp="item.time || '未记录时间'"
+                placement="top"
+                :type="item.tagType || 'info'"
+              >
+                <div class="panel-card">
+                  <div class="section-card__head">
+                    <strong>{{ item.title }}</strong>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+                      <el-tag v-if="item.tag" :type="item.tagType || 'info'" effect="light">{{ item.tag }}</el-tag>
+                      <strong v-if="item.amount !== undefined">{{ formatSignedAmount(item.amount) }}</strong>
+                    </div>
+                  </div>
+                  <div style="color: var(--el-text-color-regular); line-height: 1.7">
+                    {{ item.description }}
+                  </div>
+                  <div v-if="item.linkLabel" class="inline-actions" style="margin-top: 12px">
+                    <el-button type="primary" link @click="openFinanceTimelineTarget(item)">{{ item.linkLabel }}</el-button>
+                  </div>
+                </div>
+              </el-timeline-item>
+            </el-timeline>
+            <el-empty v-else description="暂无财务时间线数据" :image-size="80" />
+          </el-tab-pane>
+
           <el-tab-pane label="支付记录">
+            <div class="table-toolbar">
+              <div class="table-toolbar__meta">
+                <strong>账单支付流水</strong>
+                <span>共 {{ detail.payments.length }} 条</span>
+              </div>
+              <div class="inline-actions">
+                <el-button type="primary" link @click="openPaymentsWorkbench">打开支付工作台</el-button>
+                <el-button type="primary" link @click="openAccountsWorkbench">查看资金台账</el-button>
+              </div>
+            </div>
             <el-table :data="detail.payments" border stripe empty-text="暂无支付记录">
               <el-table-column prop="paymentNo" label="支付单号" min-width="160" />
               <el-table-column label="渠道" min-width="120">
                 <template #default="{ row }">{{ paymentChannelLabel(row.channel) }}</template>
+              </el-table-column>
+              <el-table-column label="来源" min-width="120">
+                <template #default="{ row }">{{ paymentSourceLabel(row.source) }}</template>
               </el-table-column>
               <el-table-column prop="tradeNo" label="交易号" min-width="180" />
               <el-table-column label="金额" min-width="120">
@@ -460,10 +952,32 @@ onMounted(async () => {
               </el-table-column>
               <el-table-column prop="operator" label="操作人" min-width="120" />
               <el-table-column prop="paidAt" label="支付时间" min-width="180" />
+              <el-table-column label="操作" min-width="180" fixed="right">
+                <template #default="{ row }">
+                  <div class="inline-actions">
+                    <el-button type="primary" link @click="openPaymentsWorkbench(row.paymentNo)">支付联查</el-button>
+                    <el-button type="primary" link @click="openAccountsWorkbench({ keyword: row.paymentNo })">
+                      台账联查
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
             </el-table>
           </el-tab-pane>
 
           <el-tab-pane label="退款记录">
+            <div class="table-toolbar">
+              <div class="table-toolbar__meta">
+                <strong>账单退款流水</strong>
+                <span>共 {{ detail.refunds.length }} 条</span>
+              </div>
+              <div class="inline-actions">
+                <el-button type="primary" link @click="openRefundsWorkbench">打开退款工作台</el-button>
+                <el-button type="primary" link @click="openAccountsWorkbench({ transactionType: 'REFUND' })">
+                  查看退款台账
+                </el-button>
+              </div>
+            </div>
             <el-table :data="detail.refunds" border stripe empty-text="暂无退款记录">
               <el-table-column prop="refundNo" label="退款单号" min-width="160" />
               <el-table-column label="金额" min-width="120">
@@ -471,13 +985,31 @@ onMounted(async () => {
               </el-table-column>
               <el-table-column prop="reason" label="原因" min-width="220" />
               <el-table-column label="状态" min-width="120">
-                <template #default="{ row }">{{ formatInvoiceStatus(row.status) }}</template>
+                <template #default="{ row }">
+                  <el-tag :type="refundStatusType(row.status)" effect="light">{{ refundStatusLabel(row.status) }}</el-tag>
+                </template>
               </el-table-column>
               <el-table-column prop="createdAt" label="创建时间" min-width="180" />
+              <el-table-column label="操作" min-width="180" fixed="right">
+                <template #default="{ row }">
+                  <div class="inline-actions">
+                    <el-button type="primary" link @click="openRefundsWorkbench(row.refundNo)">退款联查</el-button>
+                    <el-button type="primary" link @click="openAccountsWorkbench({ keyword: row.refundNo, transactionType: 'REFUND' })">
+                      台账联查
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
             </el-table>
           </el-tab-pane>
 
           <el-tab-pane label="关联服务">
+            <div class="table-toolbar">
+              <div class="table-toolbar__meta">
+                <strong>服务交付状态</strong>
+                <span>共 {{ detail.services.length }} 个服务</span>
+              </div>
+            </div>
             <el-table :data="detail.services" border stripe empty-text="暂无关联服务">
               <el-table-column prop="serviceNo" label="服务编号" min-width="180" />
               <el-table-column prop="productName" label="产品名称" min-width="220" />
@@ -485,20 +1017,14 @@ onMounted(async () => {
                 <template #default="{ row }">{{ formatProviderType(localeStore.locale, row.providerType) }}</template>
               </el-table-column>
               <el-table-column label="接口账户" min-width="220">
-                <template #default="{ row }">
-                  {{
-                    providerAccounts.find(item => item.id === row.providerAccountId)
-                      ? `${providerAccounts.find(item => item.id === row.providerAccountId)?.name} / ${providerAccounts.find(item => item.id === row.providerAccountId)?.baseUrl}`
-                      : "未绑定"
-                  }}
-                </template>
+                <template #default="{ row }">{{ providerAccountLabel(row.providerAccountId) }}</template>
               </el-table-column>
               <el-table-column label="状态" min-width="120">
                 <template #default="{ row }">{{ formatServiceStatus(localeStore.locale, row.status) }}</template>
               </el-table-column>
               <el-table-column label="操作" min-width="140" fixed="right">
                 <template #default="{ row }">
-                  <el-button type="primary" link @click="router.push(`/services/detail/${row.id}`)">打开服务</el-button>
+                  <el-button type="primary" link @click="openServiceWorkbench(row.id)">打开服务</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -517,6 +1043,14 @@ onMounted(async () => {
 
     <el-dialog v-model="receiveDialogVisible" title="登记收款" width="420px">
       <el-form label-position="top">
+        <el-alert
+          :title="receiveHint.title"
+          :description="receiveHint.description"
+          :type="receiveHint.type"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
         <el-form-item label="收款渠道">
           <el-select v-model="receiveForm.channel">
             <el-option label="线下汇款" value="OFFLINE" />
@@ -531,7 +1065,14 @@ onMounted(async () => {
       </el-form>
       <template #footer>
         <el-button @click="receiveDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="receiving" @click="submitReceivePayment">确认收款</el-button>
+        <el-button
+          type="primary"
+          :loading="receiving"
+          :disabled="receiveBalanceInsufficient"
+          @click="submitReceivePayment"
+        >
+          确认收款
+        </el-button>
       </template>
     </el-dialog>
 

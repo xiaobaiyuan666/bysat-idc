@@ -16,12 +16,12 @@ const form = reactive({
 });
 
 const copy = computed(() => ({
-  badge: pickLabel(localeStore.locale, "IDC 客户中心", "IDC Client Area"),
+  badge: pickLabel(localeStore.locale, "白猿科技客户中心", "BYSAT Client Portal"),
   title: pickLabel(localeStore.locale, "面向客户的云业务自助入口", "Self-service entry for cloud customers"),
   subtitle: pickLabel(
     localeStore.locale,
-    "统一查看服务、订单、账单、钱包和工单，支持续费、支付、状态查询和提交售后请求。",
-    "View services, orders, invoices, wallet, and tickets in one place with self-service actions."
+    "江苏白猿网络科技有限公司 · 猿创软件业务组提供统一入口，用于查看服务、订单、账单、钱包和工单，支持续费、支付、状态查询和提交售后请求。",
+    "A unified portal by Jiangsu Baiyuan Network Technology Co., Ltd. for services, orders, invoices, wallet, and tickets."
   ),
   statA: pickLabel(localeStore.locale, "客户自助", "Self Service"),
   statB: pickLabel(localeStore.locale, "统一", "Unified"),
@@ -31,6 +31,12 @@ const copy = computed(() => ({
   statCDesc: pickLabel(localeStore.locale, "状态同步", "status sync"),
   loginTitle: pickLabel(localeStore.locale, "登录客户中心", "Client Login"),
   loginSubtitle: pickLabel(localeStore.locale, "演示账号：portal / Portal123!", "Demo account: portal / Portal123!"),
+  declarationTitle: pickLabel(localeStore.locale, "版权声明", "Copyright"),
+  declarationText: pickLabel(
+    localeStore.locale,
+    "本系统由江苏白猿网络科技有限公司 - 猿创软件业务组 100% AI 开发，全部著作权归江苏白猿网络科技有限公司所有。官网：www.bysat.com",
+    "This system is 100% AI-developed by Jiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Business Group, with full copyright owned by Jiangsu Baiyuan Network Technology Co., Ltd. Website: www.bysat.com"
+  ),
   username: pickLabel(localeStore.locale, "账号", "Username"),
   password: pickLabel(localeStore.locale, "密码", "Password"),
   submit: pickLabel(localeStore.locale, "进入客户中心", "Enter Client Area"),
@@ -102,6 +108,10 @@ async function handleSubmit() {
           {{ copy.submit }}
         </el-button>
       </el-form>
+
+      <div class="portal-subtitle" style="margin-top: 16px">
+        <strong>{{ copy.declarationTitle }}：</strong>{{ copy.declarationText }}
+      </div>
     </div>
   </div>
 </template>

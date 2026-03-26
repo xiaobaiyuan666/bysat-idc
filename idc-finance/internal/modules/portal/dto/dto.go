@@ -18,8 +18,10 @@ type Ticket struct {
 }
 
 type WalletSummary struct {
-	Balance     string `json:"balance"`
-	CreditLimit string `json:"creditLimit"`
+	Balance         string `json:"balance"`
+	CreditLimit     string `json:"creditLimit"`
+	CreditUsed      string `json:"creditUsed"`
+	AvailableCredit string `json:"availableCredit"`
 }
 
 type DashboardResponse struct {
@@ -35,4 +37,9 @@ type AccountResponse struct {
 	Customer       customerDomain.Customer `json:"customer"`
 	PrimaryContact *customerDomain.Contact `json:"primaryContact,omitempty"`
 	Wallet         WalletSummary           `json:"wallet"`
+}
+
+type WalletOverviewResponse struct {
+	Wallet       WalletSummary                    `json:"wallet"`
+	Transactions []orderDomain.AccountTransaction `json:"transactions"`
 }

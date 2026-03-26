@@ -13,18 +13,21 @@ import (
 )
 
 type MemoryRepository struct {
-	mu             sync.RWMutex
-	nextOrderID    int64
-	nextInvoiceID  int64
-	nextServiceID  int64
-	nextPaymentID  int64
-	nextRefundID   int64
-	orders         []domain.Order
-	invoices       []domain.Invoice
-	services       []domain.ServiceRecord
-	payments       []domain.PaymentRecord
-	refunds        []domain.RefundRecord
-	serviceChanges []memoryServiceChangeLink
+	mu                       sync.RWMutex
+	nextOrderID              int64
+	nextInvoiceID            int64
+	nextServiceID            int64
+	nextPaymentID            int64
+	nextRefundID             int64
+	nextAccountTransactionID int64
+	orders                   []domain.Order
+	invoices                 []domain.Invoice
+	services                 []domain.ServiceRecord
+	payments                 []domain.PaymentRecord
+	refunds                  []domain.RefundRecord
+	serviceChanges           []memoryServiceChangeLink
+	wallets                  map[int64]domain.CustomerWallet
+	accountTransactions      []domain.AccountTransaction
 }
 
 type memoryServiceChangeLink struct {
@@ -78,11 +81,12 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 
 	return &MemoryRepository{
-		nextOrderID:   3,
-		nextInvoiceID: 3,
-		nextServiceID: 2,
-		nextPaymentID: 2,
-		nextRefundID:  1,
+		nextOrderID:              3,
+		nextInvoiceID:            3,
+		nextServiceID:            2,
+		nextPaymentID:            2,
+		nextRefundID:             1,
+		nextAccountTransactionID: 4,
 		orders: []domain.Order{
 			{
 				ID:                1,
@@ -193,6 +197,93 @@ func NewMemoryRepository() *MemoryRepository {
 		},
 		refunds:        []domain.RefundRecord{},
 		serviceChanges: []memoryServiceChangeLink{},
+		wallets: map[int64]domain.CustomerWallet{
+			1: {
+				CustomerID:      1,
+				CustomerNo:      "CUST-20260320-0001",
+				CustomerName:    "婕旂ず瀹㈡埛",
+				Balance:         1500,
+				CreditLimit:     5000,
+				CreditUsed:      0,
+				AvailableCredit: 5000,
+				UpdatedAt:       now.Format("2006-01-02 15:04:05"),
+			},
+			2: {
+				CustomerID:      2,
+				CustomerNo:      "CUST-20260320-0002",
+				CustomerName:    "浜戣剦浜掕仈",
+				Balance:         300,
+				CreditLimit:     2000,
+				CreditUsed:      0,
+				AvailableCredit: 2000,
+				UpdatedAt:       now.Format("2006-01-02 15:04:05"),
+			},
+		},
+		accountTransactions: []domain.AccountTransaction{
+			{
+				ID:              1,
+				TransactionNo:   "ACT-00000001",
+				CustomerID:      1,
+				CustomerNo:      "CUST-20260320-0001",
+				CustomerName:    "婕旂ず瀹㈡埛",
+				TransactionType: domain.AccountTransactionTypeRecharge,
+				Direction:       domain.AccountTransactionDirectionIn,
+				Amount:          2000,
+				BalanceBefore:   0,
+				BalanceAfter:    2000,
+				CreditBefore:    0,
+				CreditAfter:     0,
+				Channel:         "OFFLINE",
+				Summary:         "绾夸笅鍏呭€兼紨绀鸿祫閲?",
+				Remark:          "鍒濆婕旂ず鍏呭€兼祦姘?",
+				OperatorType:    "ADMIN",
+				OperatorID:      1,
+				OperatorName:    "绯荤粺",
+				OccurredAt:      now.Add(-48 * time.Hour).Format("2006-01-02 15:04:05"),
+			},
+			{
+				ID:              2,
+				TransactionNo:   "ACT-00000002",
+				CustomerID:      1,
+				CustomerNo:      "CUST-20260320-0001",
+				CustomerName:    "婕旂ず瀹㈡埛",
+				TransactionType: domain.AccountTransactionTypeAdjustment,
+				Direction:       domain.AccountTransactionDirectionOut,
+				Amount:          500,
+				BalanceBefore:   2000,
+				BalanceAfter:    1500,
+				CreditBefore:    0,
+				CreditAfter:     0,
+				Channel:         "SYSTEM",
+				Summary:         "婕旂ず浣欓鎵嬪伐鎵ｆ",
+				Remark:          "鐢ㄤ簬灞曠ず鍙拌处鏄庣粏",
+				OperatorType:    "ADMIN",
+				OperatorID:      1,
+				OperatorName:    "绯荤粺",
+				OccurredAt:      now.Add(-24 * time.Hour).Format("2006-01-02 15:04:05"),
+			},
+			{
+				ID:              3,
+				TransactionNo:   "ACT-00000003",
+				CustomerID:      1,
+				CustomerNo:      "CUST-20260320-0001",
+				CustomerName:    "婕旂ず瀹㈡埛",
+				TransactionType: domain.AccountTransactionTypeCreditLimit,
+				Direction:       domain.AccountTransactionDirectionIn,
+				Amount:          5000,
+				BalanceBefore:   1500,
+				BalanceAfter:    1500,
+				CreditBefore:    0,
+				CreditAfter:     5000,
+				Channel:         "SYSTEM",
+				Summary:         "寮€閫氫俊鐢ㄩ搴?",
+				Remark:          "婕旂ず鎺堜俊棰濆害",
+				OperatorType:    "ADMIN",
+				OperatorID:      1,
+				OperatorName:    "绯荤粺",
+				OccurredAt:      now.Add(-12 * time.Hour).Format("2006-01-02 15:04:05"),
+			},
+		},
 	}
 }
 
@@ -280,6 +371,113 @@ func (repository *MemoryRepository) GetInvoiceByID(id int64) (domain.Invoice, bo
 	return domain.Invoice{}, false
 }
 
+func (repository *MemoryRepository) GetCustomerWallet(customerID int64) (domain.CustomerWallet, bool) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+
+	item, ok := repository.wallets[customerID]
+	if !ok {
+		return domain.CustomerWallet{}, false
+	}
+	item.AvailableCredit = item.CreditLimit - item.CreditUsed
+	return item, true
+}
+
+func (repository *MemoryRepository) ListAccountTransactions(filter domain.AccountTransactionFilter) ([]domain.AccountTransaction, int) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+
+	items := slices.Clone(repository.accountTransactions)
+	filtered := make([]domain.AccountTransaction, 0, len(items))
+	for _, item := range items {
+		if filter.CustomerID > 0 && item.CustomerID != filter.CustomerID {
+			continue
+		}
+		if value := strings.TrimSpace(filter.TransactionType); value != "" && !strings.EqualFold(string(item.TransactionType), value) {
+			continue
+		}
+		if value := strings.TrimSpace(filter.Direction); value != "" && !strings.EqualFold(string(item.Direction), value) {
+			continue
+		}
+		if value := strings.TrimSpace(filter.Keyword); value != "" {
+			keyword := strings.ToLower(value)
+			if !strings.Contains(strings.ToLower(item.TransactionNo), keyword) &&
+				!strings.Contains(strings.ToLower(item.CustomerName), keyword) &&
+				!strings.Contains(strings.ToLower(item.Summary), keyword) &&
+				!strings.Contains(strings.ToLower(item.InvoiceNo), keyword) &&
+				!strings.Contains(strings.ToLower(item.OrderNo), keyword) {
+				continue
+			}
+		}
+		if filter.StartTime != "" && !timeMatchesRange(item.OccurredAt, filter.StartTime, "") {
+			continue
+		}
+		if filter.EndTime != "" && !timeMatchesRange(item.OccurredAt, "", filter.EndTime) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+
+	slices.SortFunc(filtered, func(left, right domain.AccountTransaction) int {
+		desc := !strings.EqualFold(filter.Order, "asc")
+		if desc {
+			return compareString(left.OccurredAt, right.OccurredAt, true)
+		}
+		return compareString(left.OccurredAt, right.OccurredAt, false)
+	})
+
+	total := len(filtered)
+	if filter.Limit <= 0 {
+		return filtered, total
+	}
+	page := filter.Page
+	if page <= 0 {
+		page = 1
+	}
+	start := (page - 1) * filter.Limit
+	if start >= len(filtered) {
+		return []domain.AccountTransaction{}, total
+	}
+	end := start + filter.Limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return filtered[start:end], total
+}
+
+func (repository *MemoryRepository) ListAccountTransactionsByCustomer(customerID int64, limit int) []domain.AccountTransaction {
+	items, _ := repository.ListAccountTransactions(domain.AccountTransactionFilter{
+		CustomerID: customerID,
+		Page:       1,
+		Limit:      limit,
+		Order:      "desc",
+		Sort:       "occurred_at",
+	})
+	return items
+}
+
+func (repository *MemoryRepository) AdjustCustomerWallet(
+	customerID int64,
+	input domain.WalletAdjustment,
+) (domain.CustomerWallet, domain.AccountTransaction, bool, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+
+	wallet, ok := repository.wallets[customerID]
+	if !ok {
+		return domain.CustomerWallet{}, domain.AccountTransaction{}, false, nil
+	}
+
+	transaction, updatedWallet, err := repository.applyWalletAdjustmentLocked(wallet, input, 0, "", 0, "", 0, "", 0, "")
+	if err != nil {
+		return domain.CustomerWallet{}, domain.AccountTransaction{}, false, err
+	}
+
+	repository.wallets[customerID] = updatedWallet
+	repository.accountTransactions = append([]domain.AccountTransaction{transaction}, repository.accountTransactions...)
+	return updatedWallet, transaction, true, nil
+}
+
 func (repository *MemoryRepository) GetServiceChangeOrderByInvoiceID(invoiceID int64) (domain.ServiceChangeOrder, bool) {
 	repository.mu.RLock()
 	defer repository.mu.RUnlock()
@@ -316,6 +514,28 @@ func (repository *MemoryRepository) ListServiceChangeOrdersByService(serviceID i
 		items = append(items, cloneServiceChange(item))
 	}
 	return items
+}
+
+func (repository *MemoryRepository) ListServiceChangeOrders(filter domain.ServiceChangeOrderListFilter) ([]domain.ServiceChangeOrder, int) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+
+	items := make([]domain.ServiceChangeOrder, 0)
+	for _, item := range repository.serviceChanges {
+		change := cloneServiceChange(item)
+		if !repository.matchServiceChangeOrderLocked(change, filter) {
+			continue
+		}
+		items = append(items, change)
+	}
+
+	slices.SortFunc(items, func(left, right domain.ServiceChangeOrder) int {
+		return compareMemoryServiceChangeOrders(left, right, filter.Sort, filter.Order)
+	})
+
+	total := len(items)
+	items = paginateMemoryServiceChangeOrders(items, filter.Page, filter.Limit)
+	return items, total
 }
 
 func (repository *MemoryRepository) UpdatePendingOrder(
@@ -685,6 +905,46 @@ func (repository *MemoryRepository) ListPaymentsByInvoice(invoiceID int64) []dom
 	return items
 }
 
+func (repository *MemoryRepository) ListPayments(filter domain.PaymentListFilter) ([]domain.PaymentRecord, int) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+
+	items := make([]domain.PaymentRecord, 0, len(repository.payments))
+	for _, item := range repository.payments {
+		if filter.CustomerID > 0 && item.CustomerID != filter.CustomerID {
+			continue
+		}
+		if filter.InvoiceID > 0 && item.InvoiceID != filter.InvoiceID {
+			continue
+		}
+		if filter.Channel != "" && !strings.EqualFold(item.Channel, filter.Channel) {
+			continue
+		}
+		if filter.Status != "" && !strings.EqualFold(string(item.Status), filter.Status) {
+			continue
+		}
+		items = append(items, item)
+	}
+
+	total := len(items)
+	if filter.Limit > 0 {
+		page := filter.Page
+		if page <= 0 {
+			page = 1
+		}
+		start := (page - 1) * filter.Limit
+		if start >= len(items) {
+			return []domain.PaymentRecord{}, total
+		}
+		end := start + filter.Limit
+		if end > len(items) {
+			end = len(items)
+		}
+		items = items[start:end]
+	}
+	return items, total
+}
+
 func (repository *MemoryRepository) ListRefundsByInvoice(invoiceID int64) []domain.RefundRecord {
 	repository.mu.RLock()
 	defer repository.mu.RUnlock()
@@ -696,6 +956,43 @@ func (repository *MemoryRepository) ListRefundsByInvoice(invoiceID int64) []doma
 		}
 	}
 	return items
+}
+
+func (repository *MemoryRepository) ListRefunds(filter domain.RefundListFilter) ([]domain.RefundRecord, int) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+
+	items := make([]domain.RefundRecord, 0, len(repository.refunds))
+	for _, item := range repository.refunds {
+		if filter.CustomerID > 0 && item.CustomerID != filter.CustomerID {
+			continue
+		}
+		if filter.InvoiceID > 0 && item.InvoiceID != filter.InvoiceID {
+			continue
+		}
+		if filter.Status != "" && !strings.EqualFold(string(item.Status), filter.Status) {
+			continue
+		}
+		items = append(items, item)
+	}
+
+	total := len(items)
+	if filter.Limit > 0 {
+		page := filter.Page
+		if page <= 0 {
+			page = 1
+		}
+		start := (page - 1) * filter.Limit
+		if start >= len(items) {
+			return []domain.RefundRecord{}, total
+		}
+		end := start + filter.Limit
+		if end > len(items) {
+			end = len(items)
+		}
+		items = items[start:end]
+	}
+	return items, total
 }
 
 func (repository *MemoryRepository) Checkout(
@@ -778,6 +1075,28 @@ func (repository *MemoryRepository) PayInvoice(invoiceID int64, channel, source,
 		}
 
 		now := time.Now()
+		paymentChannel := strings.ToUpper(strings.TrimSpace(firstNonEmpty(channel, "ONLINE")))
+		if paymentChannel == "BALANCE" {
+			wallet, exists := repository.wallets[invoice.CustomerID]
+			if !exists || wallet.Balance+0.00001 < invoice.TotalAmount {
+				return domain.Invoice{}, nil, domain.PaymentRecord{}, false
+			}
+			transaction, updatedWallet, err := repository.applyWalletAdjustmentLocked(wallet, domain.WalletAdjustment{
+				Target:       "BALANCE",
+				Operation:    "DECREASE",
+				Amount:       invoice.TotalAmount,
+				Summary:      fmt.Sprintf("浣欓鏀粯璐﹀崟 %s", invoice.InvoiceNo),
+				Remark:       fmt.Sprintf("invoice:%s", invoice.InvoiceNo),
+				OperatorType: firstNonEmpty(source, "PORTAL"),
+				OperatorName: firstNonEmpty(operator, "绯荤粺"),
+			}, invoice.OrderID, invoice.OrderNo, invoice.ID, invoice.InvoiceNo, 0, "", 0, "")
+			if err != nil {
+				return domain.Invoice{}, nil, domain.PaymentRecord{}, false
+			}
+			transaction.TransactionType = domain.AccountTransactionTypeConsume
+			repository.wallets[invoice.CustomerID] = updatedWallet
+			repository.accountTransactions = append([]domain.AccountTransaction{transaction}, repository.accountTransactions...)
+		}
 		invoice.Status = domain.InvoiceStatusPaid
 		invoice.PaidAt = now.Format("2006-01-02 15:04:05")
 		repository.invoices[invoiceIndex] = invoice
@@ -788,7 +1107,7 @@ func (repository *MemoryRepository) PayInvoice(invoiceID int64, channel, source,
 			InvoiceID:  invoice.ID,
 			OrderID:    invoice.OrderID,
 			CustomerID: invoice.CustomerID,
-			Channel:    firstNonEmpty(channel, "ONLINE"),
+			Channel:    paymentChannel,
 			TradeNo:    firstNonEmpty(tradeNo, fmt.Sprintf("TRADE-%08d", repository.nextPaymentID)),
 			Amount:     invoice.TotalAmount,
 			Source:     firstNonEmpty(source, "PORTAL"),
@@ -798,6 +1117,10 @@ func (repository *MemoryRepository) PayInvoice(invoiceID int64, channel, source,
 		}
 		repository.nextPaymentID++
 		repository.payments = append([]domain.PaymentRecord{payment}, repository.payments...)
+		if payment.Channel == "BALANCE" && len(repository.accountTransactions) > 0 && repository.accountTransactions[0].PaymentID == 0 {
+			repository.accountTransactions[0].PaymentID = payment.ID
+			repository.accountTransactions[0].PaymentNo = payment.PaymentNo
+		}
 		changeLink, isServiceChange := repository.findServiceChangeByInvoiceLocked(invoice.ID)
 
 		for orderIndex, order := range repository.orders {
@@ -1094,6 +1417,24 @@ func (repository *MemoryRepository) RefundInvoice(invoiceID int64, reason string
 		}
 		repository.nextRefundID++
 		repository.refunds = append([]domain.RefundRecord{refund}, repository.refunds...)
+		if payment, ok := repository.findLatestPaymentLocked(invoice.ID); ok && strings.EqualFold(payment.Channel, "BALANCE") {
+			if wallet, exists := repository.wallets[invoice.CustomerID]; exists {
+				transaction, updatedWallet, err := repository.applyWalletAdjustmentLocked(wallet, domain.WalletAdjustment{
+					Target:       "BALANCE",
+					Operation:    "INCREASE",
+					Amount:       refund.Amount,
+					Summary:      fmt.Sprintf("閫€娆惧洖閫€浣欓 %s", refund.RefundNo),
+					Remark:       reason,
+					OperatorType: "ADMIN",
+					OperatorName: "绯荤粺",
+				}, invoice.OrderID, invoice.OrderNo, invoice.ID, invoice.InvoiceNo, payment.ID, payment.PaymentNo, refund.ID, refund.RefundNo)
+				if err == nil {
+					transaction.TransactionType = domain.AccountTransactionTypeRefund
+					repository.wallets[invoice.CustomerID] = updatedWallet
+					repository.accountTransactions = append([]domain.AccountTransaction{transaction}, repository.accountTransactions...)
+				}
+			}
+		}
 
 		var updatedService *domain.ServiceRecord
 		changeLink, isServiceChange := repository.findServiceChangeByInvoiceLocked(invoice.ID)
@@ -1194,6 +1535,239 @@ func cloneServiceChange(link memoryServiceChangeLink) domain.ServiceChangeOrder 
 		CreatedAt:    link.CreatedAt,
 		UpdatedAt:    link.UpdatedAt,
 	}
+}
+
+func (repository *MemoryRepository) matchServiceChangeOrderLocked(item domain.ServiceChangeOrder, filter domain.ServiceChangeOrderListFilter) bool {
+	if filter.ServiceID > 0 && item.ServiceID != filter.ServiceID {
+		return false
+	}
+	if filter.OrderID > 0 && item.OrderID != filter.OrderID {
+		return false
+	}
+	if filter.InvoiceID > 0 && item.InvoiceID != filter.InvoiceID {
+		return false
+	}
+	if value := strings.TrimSpace(filter.Status); value != "" && !strings.EqualFold(item.Status, value) {
+		return false
+	}
+	if value := strings.TrimSpace(filter.Action); value != "" && !strings.EqualFold(item.ActionName, value) {
+		return false
+	}
+	if value := strings.ToLower(strings.TrimSpace(filter.Keyword)); value != "" {
+		orderNo := repository.memoryOrderNoLocked(item.OrderID)
+		invoiceNo := repository.memoryInvoiceNoLocked(item.InvoiceID)
+		serviceNo := repository.memoryServiceNoLocked(item.ServiceID)
+		if !strings.Contains(strings.ToLower(item.Title), value) &&
+			!strings.Contains(strings.ToLower(item.ActionName), value) &&
+			!strings.Contains(strings.ToLower(item.Reason), value) &&
+			!strings.Contains(strings.ToLower(orderNo), value) &&
+			!strings.Contains(strings.ToLower(invoiceNo), value) &&
+			!strings.Contains(strings.ToLower(serviceNo), value) {
+			return false
+		}
+	}
+	return true
+}
+
+func (repository *MemoryRepository) memoryOrderNoLocked(orderID int64) string {
+	for _, item := range repository.orders {
+		if item.ID == orderID {
+			return item.OrderNo
+		}
+	}
+	return ""
+}
+
+func (repository *MemoryRepository) memoryInvoiceNoLocked(invoiceID int64) string {
+	for _, item := range repository.invoices {
+		if item.ID == invoiceID {
+			return item.InvoiceNo
+		}
+	}
+	return ""
+}
+
+func (repository *MemoryRepository) memoryServiceNoLocked(serviceID int64) string {
+	for _, item := range repository.services {
+		if item.ID == serviceID {
+			return item.ServiceNo
+		}
+	}
+	return ""
+}
+
+func compareMemoryServiceChangeOrders(left, right domain.ServiceChangeOrder, sortField, order string) int {
+	desc := strings.EqualFold(order, "desc")
+	switch strings.ToLower(strings.TrimSpace(sortField)) {
+	case "amount":
+		if left.Amount == right.Amount {
+			return compareByID(left.ID, right.ID, desc)
+		}
+		if desc {
+			if left.Amount > right.Amount {
+				return -1
+			}
+			return 1
+		}
+		if left.Amount < right.Amount {
+			return -1
+		}
+		return 1
+	case "status":
+		if result := compareString(left.Status, right.Status, desc); result != 0 {
+			return result
+		}
+		return compareByID(left.ID, right.ID, desc)
+	case "paid_at":
+		if result := compareString(left.PaidAt, right.PaidAt, desc); result != 0 {
+			return result
+		}
+		return compareByID(left.ID, right.ID, desc)
+	case "refunded_at":
+		if result := compareString(left.RefundedAt, right.RefundedAt, desc); result != 0 {
+			return result
+		}
+		return compareByID(left.ID, right.ID, desc)
+	default:
+		if result := compareString(left.CreatedAt, right.CreatedAt, desc); result != 0 {
+			return result
+		}
+		return compareByID(left.ID, right.ID, desc)
+	}
+}
+
+func (repository *MemoryRepository) applyWalletAdjustmentLocked(
+	wallet domain.CustomerWallet,
+	input domain.WalletAdjustment,
+	orderID int64,
+	orderNo string,
+	invoiceID int64,
+	invoiceNo string,
+	paymentID int64,
+	paymentNo string,
+	refundID int64,
+	refundNo string,
+) (domain.AccountTransaction, domain.CustomerWallet, error) {
+	target := strings.ToUpper(strings.TrimSpace(input.Target))
+	operation := strings.ToUpper(strings.TrimSpace(input.Operation))
+	if input.Amount < 0 {
+		return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("调整金额不能小于 0")
+	}
+
+	transaction := domain.AccountTransaction{
+		ID:            repository.nextAccountTransactionID,
+		TransactionNo: fmt.Sprintf("ACT-%08d", repository.nextAccountTransactionID),
+		CustomerID:    wallet.CustomerID,
+		CustomerNo:    wallet.CustomerNo,
+		CustomerName:  wallet.CustomerName,
+		OrderID:       orderID,
+		OrderNo:       orderNo,
+		InvoiceID:     invoiceID,
+		InvoiceNo:     invoiceNo,
+		PaymentID:     paymentID,
+		PaymentNo:     paymentNo,
+		RefundID:      refundID,
+		RefundNo:      refundNo,
+		Channel:       firstNonEmpty(strings.ToUpper(strings.TrimSpace(input.OperatorType)), "SYSTEM"),
+		Summary:       strings.TrimSpace(input.Summary),
+		Remark:        strings.TrimSpace(input.Remark),
+		OperatorType:  firstNonEmpty(strings.ToUpper(strings.TrimSpace(input.OperatorType)), "ADMIN"),
+		OperatorID:    input.OperatorID,
+		OperatorName:  firstNonEmpty(input.OperatorName, "绯荤粺"),
+		OccurredAt:    time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	switch target {
+	case "BALANCE":
+		transaction.TransactionType = domain.AccountTransactionTypeAdjustment
+		transaction.BalanceBefore = wallet.Balance
+		transaction.BalanceAfter = wallet.Balance
+		transaction.CreditBefore = wallet.CreditLimit
+		transaction.CreditAfter = wallet.CreditLimit
+		switch operation {
+		case "INCREASE":
+			transaction.Direction = domain.AccountTransactionDirectionIn
+			transaction.BalanceAfter = wallet.Balance + input.Amount
+		case "DECREASE":
+			if wallet.Balance+0.00001 < input.Amount {
+				return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("余额不足")
+			}
+			transaction.Direction = domain.AccountTransactionDirectionOut
+			transaction.BalanceAfter = wallet.Balance - input.Amount
+		case "SET":
+			transaction.BalanceAfter = input.Amount
+			switch {
+			case transaction.BalanceAfter > transaction.BalanceBefore:
+				transaction.Direction = domain.AccountTransactionDirectionIn
+			case transaction.BalanceAfter < transaction.BalanceBefore:
+				transaction.Direction = domain.AccountTransactionDirectionOut
+			default:
+				transaction.Direction = domain.AccountTransactionDirectionFlat
+			}
+			input.Amount = absFloat(transaction.BalanceAfter - transaction.BalanceBefore)
+		default:
+			return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("余额调整方式不支持")
+		}
+		transaction.Amount = input.Amount
+		if strings.TrimSpace(transaction.Summary) == "" {
+			transaction.Summary = "浣欓璋冩暣"
+		}
+		wallet.Balance = transaction.BalanceAfter
+
+	case "CREDIT_LIMIT":
+		transaction.TransactionType = domain.AccountTransactionTypeCreditLimit
+		transaction.BalanceBefore = wallet.Balance
+		transaction.BalanceAfter = wallet.Balance
+		transaction.CreditBefore = wallet.CreditLimit
+		transaction.CreditAfter = wallet.CreditLimit
+		switch operation {
+		case "INCREASE":
+			transaction.Direction = domain.AccountTransactionDirectionIn
+			transaction.CreditAfter = wallet.CreditLimit + input.Amount
+		case "DECREASE":
+			if wallet.CreditLimit+0.00001 < input.Amount {
+				return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("信用额度不足")
+			}
+			transaction.Direction = domain.AccountTransactionDirectionOut
+			transaction.CreditAfter = wallet.CreditLimit - input.Amount
+		case "SET":
+			transaction.CreditAfter = input.Amount
+			switch {
+			case transaction.CreditAfter > transaction.CreditBefore:
+				transaction.Direction = domain.AccountTransactionDirectionIn
+			case transaction.CreditAfter < transaction.CreditBefore:
+				transaction.Direction = domain.AccountTransactionDirectionOut
+			default:
+				transaction.Direction = domain.AccountTransactionDirectionFlat
+			}
+			input.Amount = absFloat(transaction.CreditAfter - transaction.CreditBefore)
+		default:
+			return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("信用额度调整方式不支持")
+		}
+		if transaction.CreditAfter+0.00001 < wallet.CreditUsed {
+			return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("信用额度不能小于已使用额度")
+		}
+		transaction.Amount = input.Amount
+		if strings.TrimSpace(transaction.Summary) == "" {
+			transaction.Summary = "淇＄敤棰濆害璋冩暣"
+		}
+		wallet.CreditLimit = transaction.CreditAfter
+
+	default:
+		return domain.AccountTransaction{}, domain.CustomerWallet{}, fmt.Errorf("调整目标不支持")
+	}
+
+	wallet.AvailableCredit = wallet.CreditLimit - wallet.CreditUsed
+	wallet.UpdatedAt = transaction.OccurredAt
+	repository.nextAccountTransactionID++
+	return transaction, wallet, nil
+}
+
+func absFloat(value float64) float64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func firstNonEmpty(value, fallback string) string {
@@ -1601,6 +2175,24 @@ func paginateMemoryServices(items []domain.ServiceRecord, page, limit int) []dom
 	start := (page - 1) * limit
 	if start >= len(items) {
 		return []domain.ServiceRecord{}
+	}
+	end := start + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end]
+}
+
+func paginateMemoryServiceChangeOrders(items []domain.ServiceChangeOrder, page, limit int) []domain.ServiceChangeOrder {
+	if limit <= 0 {
+		return items
+	}
+	if page <= 0 {
+		page = 1
+	}
+	start := (page - 1) * limit
+	if start >= len(items) {
+		return []domain.ServiceChangeOrder{}
 	}
 	end := start + limit
 	if end > len(items) {

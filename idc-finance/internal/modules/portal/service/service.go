@@ -29,7 +29,7 @@ func (service *Service) GetDashboard(customerID int64) (portalDTO.DashboardRespo
 	invoices := service.order.ListInvoicesByCustomer(customerID)
 	services := service.order.ListServicesByCustomer(customerID)
 	tickets, _ := service.customer.ListTickets(customerID)
-	wallet := walletForCustomer(customerID)
+	wallet := service.walletSummaryForCustomer(customerID)
 
 	return portalDTO.DashboardResponse{
 		Stats: []portalDTO.Stat{
@@ -63,7 +63,7 @@ func (service *Service) GetAccount(customerID int64) (portalDTO.AccountResponse,
 
 	account := portalDTO.AccountResponse{
 		Customer: customer,
-		Wallet:   walletForCustomer(customerID),
+		Wallet:   service.walletSummaryForCustomer(customerID),
 	}
 	for index := range customer.Contacts {
 		if customer.Contacts[index].IsPrimary {
@@ -76,6 +76,17 @@ func (service *Service) GetAccount(customerID int64) (portalDTO.AccountResponse,
 	}
 
 	return account, true
+}
+
+func (service *Service) GetWallet(customerID int64) (portalDTO.WalletOverviewResponse, bool) {
+	if _, exists := service.customer.GetByID(customerID); !exists {
+		return portalDTO.WalletOverviewResponse{}, false
+	}
+
+	return portalDTO.WalletOverviewResponse{
+		Wallet:       service.walletSummaryForCustomer(customerID),
+		Transactions: service.order.ListAccountTransactionsByCustomer(customerID, 50),
+	}, true
 }
 
 func mapTickets(items []customerDTO.RelatedItem) []portalDTO.Ticket {
@@ -111,17 +122,25 @@ func countOpenTickets(items []customerDTO.RelatedItem) int {
 	return total
 }
 
-func walletForCustomer(customerID int64) portalDTO.WalletSummary {
-	if customerID == 1 {
+func (service *Service) walletSummaryForCustomer(customerID int64) portalDTO.WalletSummary {
+	if wallet, ok := service.order.GetCustomerWallet(customerID); ok {
 		return portalDTO.WalletSummary{
-			Balance:     "320.00",
-			CreditLimit: "5000.00",
+			Balance:         formatWalletValue(wallet.Balance),
+			CreditLimit:     formatWalletValue(wallet.CreditLimit),
+			CreditUsed:      formatWalletValue(wallet.CreditUsed),
+			AvailableCredit: formatWalletValue(wallet.AvailableCredit),
 		}
 	}
 	return portalDTO.WalletSummary{
-		Balance:     "0.00",
-		CreditLimit: "1000.00",
+		Balance:         "0.00",
+		CreditLimit:     "0.00",
+		CreditUsed:      "0.00",
+		AvailableCredit: "0.00",
 	}
+}
+
+func formatWalletValue(value float64) string {
+	return fmt.Sprintf("%.2f", value)
 }
 
 func formatCurrency(value string) string {

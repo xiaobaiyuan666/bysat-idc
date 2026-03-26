@@ -25,6 +25,8 @@ func (handler *Handler) RegisterAdminRoutes(router *gin.RouterGroup) {
 	router.GET("/products/:id", handler.detail)
 	router.POST("/products", handler.create)
 	router.POST("/products/import-upstream", handler.importUpstream)
+	router.GET("/products/import-upstream/history", handler.listImportUpstreamHistory)
+	router.GET("/products/import-upstream/history/:id", handler.detailImportUpstreamHistory)
 	router.PATCH("/products/:id", handler.update)
 	router.POST("/products/:id/upstream/sync", handler.syncUpstream)
 	router.GET("/product-groups", handler.groups)
@@ -105,6 +107,34 @@ func (handler *Handler) importUpstream(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{
 			"code":      "PRODUCT_IMPORT_FAILED",
 			"message":   err.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(result, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) listImportUpstreamHistory(c *gin.Context) {
+	var query dto.UpstreamImportHistoryQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "上游同步记录查询参数不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(handler.service.ListUpstreamImportHistory(query), middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) detailImportUpstreamHistory(c *gin.Context) {
+	result, ok := handler.service.GetUpstreamImportHistory(c.Param("id"))
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":      "UPSTREAM_IMPORT_HISTORY_NOT_FOUND",
+			"message":   "未找到对应的上游同步记录",
 			"requestId": middleware.GetRequestID(c),
 		})
 		return

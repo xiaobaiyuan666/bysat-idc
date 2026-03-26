@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import StatusTabs from "@/components/workbench/StatusTabs.vue";
@@ -17,6 +17,7 @@ import {
 type TabKey = "ALL" | "ACTIVE" | "SUSPENDED" | "TERMINATED" | "MOFANG_CLOUD";
 
 const router = useRouter();
+const route = useRoute();
 
 const loading = ref(false);
 const syncLoading = ref(false);
@@ -50,6 +51,19 @@ const activeCount = computed(() => services.value.filter(item => item.status ===
 const suspendedCount = computed(() => services.value.filter(item => item.status === "SUSPENDED").length);
 const terminatedCount = computed(() => services.value.filter(item => item.status === "TERMINATED").length);
 const syncFailedCount = computed(() => services.value.filter(item => item.syncStatus === "FAILED").length);
+const selectedMofangRows = computed(() => selectedRows.value.filter(item => item.providerType === "MOFANG_CLOUD"));
+const currentPageMofangRows = computed(() => services.value.filter(item => item.providerType === "MOFANG_CLOUD"));
+const syncActionLabel = computed(() => {
+  if (selectedRows.value.length > 0) {
+    return `同步选中实例服务${selectedMofangRows.value.length > 0 ? ` (${selectedMofangRows.value.length})` : ""}`;
+  }
+  return `同步当前页实例服务${currentPageMofangRows.value.length > 0 ? ` (${currentPageMofangRows.value.length})` : ""}`;
+});
+const syncActionDisabled = computed(() => {
+  if (syncLoading.value) return true;
+  if (selectedRows.value.length > 0) return selectedMofangRows.value.length === 0;
+  return currentPageMofangRows.value.length === 0;
+});
 
 async function loadServices() {
   loading.value = true;
@@ -87,6 +101,20 @@ function resetFilters() {
   filters.syncStatus = "";
   pagination.page = 1;
   void loadServices();
+}
+
+function readRouteQueryValue(value: unknown) {
+  if (Array.isArray(value)) return String(value[0] ?? "");
+  if (value === undefined || value === null) return "";
+  return String(value);
+}
+
+function syncFiltersFromRoute() {
+  filters.keyword = readRouteQueryValue(route.query.keyword);
+  filters.providerType = readRouteQueryValue(route.query.providerType).toUpperCase();
+  filters.providerAccountId = readRouteQueryValue(route.query.providerAccountId);
+  filters.syncStatus = readRouteQueryValue(route.query.syncStatus).toUpperCase();
+  pagination.page = 1;
 }
 
 function applyFilters() {
@@ -162,9 +190,10 @@ function syncStatusType(value: string) {
 }
 
 async function syncSelectedServices(rows?: ServiceRecord[]) {
-  const targetRows = (rows ?? selectedRows.value).filter(item => item.providerType === "MOFANG_CLOUD");
+  const baseRows = rows ?? (selectedRows.value.length > 0 ? selectedRows.value : currentPageMofangRows.value);
+  const targetRows = baseRows.filter(item => item.providerType === "MOFANG_CLOUD");
   if (targetRows.length === 0) {
-    ElMessage.info("请先选择魔方云服务");
+    ElMessage.info(selectedRows.value.length > 0 ? "选中的服务里没有可同步的实例渠道服务" : "当前页没有可同步的实例渠道服务");
     return;
   }
 
@@ -175,7 +204,10 @@ async function syncSelectedServices(rows?: ServiceRecord[]) {
       await syncMofangService(item.id);
       successCount += 1;
     }
-    ElMessage.success(`已完成 ${successCount} 台服务的同步`);
+    const ignoredCount = baseRows.length - targetRows.length;
+    ElMessage.success(
+      ignoredCount > 0 ? `已完成 ${successCount} 台实例服务同步，忽略 ${ignoredCount} 台非实例渠道服务` : `已完成 ${successCount} 台实例服务同步`
+    );
     await loadServices();
   } finally {
     syncLoading.value = false;
@@ -234,8 +266,17 @@ watch(activeTab, () => {
 });
 
 onMounted(() => {
+  syncFiltersFromRoute();
   void loadServices();
 });
+
+watch(
+  () => route.fullPath,
+  () => {
+    syncFiltersFromRoute();
+    void loadServices();
+  }
+);
 </script>
 
 <template>
@@ -247,7 +288,9 @@ onMounted(() => {
     >
       <template #actions>
         <el-button @click="loadServices">刷新列表</el-button>
-        <el-button type="primary" :loading="syncLoading" @click="syncSelectedServices()">同步选中魔方云服务</el-button>
+        <el-button type="primary" :loading="syncLoading" :disabled="syncActionDisabled" @click="syncSelectedServices()">
+          {{ syncActionLabel }}
+        </el-button>
       </template>
 
       <template #metrics>

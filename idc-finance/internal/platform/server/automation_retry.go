@@ -96,13 +96,16 @@ func (executor *automationRetryExecutor) Execute(task automationDomain.Task) err
 		case "receive-payment":
 			var payload orderDTO.ReceivePaymentRequest
 			_ = parseTaskPayload(task.RequestPayload, &payload)
-			_, _, _, ok := executor.order.ReceiveInvoicePayment(
+			_, _, _, ok, err := executor.order.ReceiveInvoicePayment(
 				task.InvoiceID,
 				payload,
 				0,
 				firstNonEmpty(task.OperatorName, "自动化任务重试"),
 				"automation-retry",
 			)
+			if err != nil {
+				return err
+			}
 			if !ok {
 				return fmt.Errorf("账单收款重试失败")
 			}

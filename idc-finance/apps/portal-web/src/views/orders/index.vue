@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { loadOrders, type PortalOrder } from "@/api/portal";
 import { pickLabel } from "@/locales";
 import { useLocaleStore } from "@/store";
@@ -11,6 +12,8 @@ import {
 } from "@/utils/business";
 
 const localeStore = useLocaleStore();
+const route = useRoute();
+const router = useRouter();
 const loading = ref(true);
 const error = ref("");
 const orders = ref<PortalOrder[]>([]);
@@ -31,6 +34,12 @@ const activeCount = computed(
   () => orders.value.filter(item => item.status === "ACTIVE" || item.status === "COMPLETED").length
 );
 
+const quickActions = computed(() => [
+  { label: pickLabel(localeStore.locale, "前往商城", "Open Store"), path: "/store", type: "primary" as const },
+  { label: pickLabel(localeStore.locale, "处理账单", "Invoices"), path: "/invoices", type: "danger" as const },
+  { label: pickLabel(localeStore.locale, "查看服务", "Services"), path: "/services", type: "info" as const }
+]);
+
 const copy = computed(() => ({
   badge: pickLabel(localeStore.locale, "订单中心", "Orders"),
   title: pickLabel(localeStore.locale, "订单中心", "Orders"),
@@ -43,11 +52,7 @@ const copy = computed(() => ({
   pending: pickLabel(localeStore.locale, "待支付", "Pending"),
   active: pickLabel(localeStore.locale, "已生效", "Active"),
   listTitle: pickLabel(localeStore.locale, "订单列表", "Order List"),
-  listDesc: pickLabel(
-    localeStore.locale,
-    "支持按编号、产品名称和状态筛选。",
-    "Filter by order number, product name, and status."
-  ),
+  listDesc: pickLabel(localeStore.locale, "支持按编号、产品名称和状态筛选。", "Filter by order number, product name, and status."),
   keywordPlaceholder: pickLabel(localeStore.locale, "搜索订单编号或产品名称", "Search order no. or product"),
   statusPlaceholder: pickLabel(localeStore.locale, "订单状态", "Order Status"),
   visible: pickLabel(localeStore.locale, "当前显示", "Visible"),
@@ -57,7 +62,10 @@ const copy = computed(() => ({
   amount: pickLabel(localeStore.locale, "金额", "Amount"),
   status: pickLabel(localeStore.locale, "状态", "Status"),
   createdAt: pickLabel(localeStore.locale, "创建时间", "Created At"),
-  empty: pickLabel(localeStore.locale, "暂无匹配的订单记录。", "No matching orders.")
+  action: pickLabel(localeStore.locale, "操作", "Action"),
+  openInvoices: pickLabel(localeStore.locale, "关联账单", "Invoices"),
+  empty: pickLabel(localeStore.locale, "暂无匹配的订单记录。", "No matching orders."),
+  loadError: pickLabel(localeStore.locale, "订单列表加载失败", "Failed to load orders")
 }));
 
 async function fetchOrders() {
@@ -66,13 +74,31 @@ async function fetchOrders() {
   try {
     orders.value = await loadOrders();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : pickLabel(localeStore.locale, "订单列表加载失败", "Failed to load orders");
+    error.value = err instanceof Error ? err.message : copy.value.loadError;
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(fetchOrders);
+function applyRouteFilters() {
+  const orderNo = typeof route.query.orderNo === "string" ? route.query.orderNo : "";
+  const keywordQuery = typeof route.query.keyword === "string" ? route.query.keyword : "";
+  const statusQuery = typeof route.query.status === "string" ? route.query.status : "";
+  keyword.value = orderNo || keywordQuery;
+  status.value = statusQuery;
+}
+
+onMounted(() => {
+  applyRouteFilters();
+  void fetchOrders();
+});
+
+watch(
+  () => [route.query.orderNo, route.query.keyword, route.query.status],
+  () => {
+    applyRouteFilters();
+  }
+);
 </script>
 
 <template>
@@ -86,6 +112,18 @@ onMounted(fetchOrders);
           <h1 class="portal-title" style="margin-top: 12px">{{ copy.title }}</h1>
           <p class="portal-subtitle">{{ copy.subtitle }}</p>
         </div>
+      </div>
+
+      <div class="portal-toolbar" style="margin-top: 18px">
+        <el-button
+          v-for="item in quickActions"
+          :key="item.path"
+          :type="item.type"
+          plain
+          @click="router.push(item.path)"
+        >
+          {{ item.label }}
+        </el-button>
       </div>
 
       <div class="portal-grid portal-grid--three" style="margin-top: 20px">
@@ -145,6 +183,13 @@ onMounted(fetchOrders);
           </template>
         </el-table-column>
         <el-table-column prop="createdAt" :label="copy.createdAt" min-width="180" />
+        <el-table-column :label="copy.action" min-width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link @click="router.push(`/invoices?keyword=${row.orderNo}`)">
+              {{ copy.openInvoices }}
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <div v-else class="portal-empty-state" style="margin: 20px">
         {{ copy.empty }}

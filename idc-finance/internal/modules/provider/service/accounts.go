@@ -792,7 +792,7 @@ func (service *Service) ListUpstreamProducts(accountIDs ...int64) ([]UpstreamCat
 
 	root, ok := raw.Parsed.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("?????????????")
+		return nil, fmt.Errorf("上游商品目录返回格式不正确")
 	}
 
 	return parseUpstreamCatalogGroups(root)
@@ -800,7 +800,7 @@ func (service *Service) ListUpstreamProducts(accountIDs ...int64) ([]UpstreamCat
 
 func parseUpstreamCatalogGroups(root map[string]any) ([]UpstreamCatalogGroup, error) {
 	if root == nil {
-		return nil, fmt.Errorf("??????????")
+		return nil, fmt.Errorf("上游商品目录响应为空")
 	}
 
 	groups := extractUpstreamCatalogGroupRecords(root["data"])
@@ -916,7 +916,7 @@ func (service *Service) GetUpstreamProductTemplate(remoteProductCode string, acc
 		return UpstreamProductTemplate{}, err
 	}
 	if strings.TrimSpace(remoteProductCode) == "" {
-		return UpstreamProductTemplate{}, fmt.Errorf("????????")
+		return UpstreamProductTemplate{}, fmt.Errorf("缺少远端商品编码")
 	}
 
 	raw, err := service.requestWithAccount(account, http.MethodGet, "/cart/get_product_config", map[string]any{
@@ -928,7 +928,7 @@ func (service *Service) GetUpstreamProductTemplate(remoteProductCode string, acc
 
 	root, ok := raw.Parsed.(map[string]any)
 	if !ok {
-		return UpstreamProductTemplate{}, fmt.Errorf("?????????????")
+		return UpstreamProductTemplate{}, fmt.Errorf("上游商品配置返回格式不正确")
 	}
 
 	data, _ := root["data"].(map[string]any)

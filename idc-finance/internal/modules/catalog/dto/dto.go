@@ -67,11 +67,13 @@ type SyncProductUpstreamRequest struct {
 
 type ImportUpstreamProductsRequest struct {
 	ProviderAccountID  int64    `json:"providerAccountId"`
+	ProviderType       string   `json:"providerType"`
 	RemoteProductCodes []string `json:"remoteProductCodes"`
 	ImportAll          bool     `json:"importAll"`
 	AutoSyncPricing    bool     `json:"autoSyncPricing"`
 	AutoSyncConfig     bool     `json:"autoSyncConfig"`
 	AutoSyncTemplate   bool     `json:"autoSyncTemplate"`
+	DeactivateMissing  bool     `json:"deactivateMissing"`
 }
 
 type ImportUpstreamProductItem struct {
@@ -87,9 +89,11 @@ type ImportUpstreamProductItem struct {
 
 type ImportUpstreamProductsResponse struct {
 	ProviderAccountID int64                       `json:"providerAccountId"`
+	HistoryID         string                      `json:"historyId"`
 	ImportedCount     int                         `json:"importedCount"`
 	UpdatedCount      int                         `json:"updatedCount"`
 	FailedCount       int                         `json:"failedCount"`
+	DeactivatedCount  int                         `json:"deactivatedCount"`
 	Items             []ImportUpstreamProductItem `json:"items"`
 	Total             int                         `json:"total"`
 	Created           int                         `json:"created"`
@@ -97,6 +101,48 @@ type ImportUpstreamProductsResponse struct {
 	Skipped           int                         `json:"skipped"`
 	Failed            int                         `json:"failed"`
 	Message           string                      `json:"message"`
+}
+
+type UpstreamImportHistoryQuery struct {
+	ProviderAccountID int64  `form:"providerAccountId"`
+	ProviderType      string `form:"providerType"`
+	Status            string `form:"status"`
+	Keyword           string `form:"keyword"`
+	Limit             int    `form:"limit"`
+}
+
+type UpstreamImportHistoryRecord struct {
+	HistoryID         string   `json:"historyId"`
+	ProviderAccountID int64    `json:"providerAccountId"`
+	ProviderType      string   `json:"providerType"`
+	AccountName       string   `json:"accountName"`
+	SourceName        string   `json:"sourceName"`
+	Status            string   `json:"status"`
+	Message           string   `json:"message"`
+	ImportAll         bool     `json:"importAll"`
+	AutoSyncPricing   bool     `json:"autoSyncPricing"`
+	AutoSyncConfig    bool     `json:"autoSyncConfig"`
+	AutoSyncTemplate  bool     `json:"autoSyncTemplate"`
+	DeactivateMissing bool     `json:"deactivateMissing"`
+	RequestedCodes    []string `json:"requestedCodes"`
+	Created           int      `json:"created"`
+	Updated           int      `json:"updated"`
+	Deactivated       int      `json:"deactivated"`
+	Failed            int      `json:"failed"`
+	Total             int      `json:"total"`
+	CreatedAt         string   `json:"createdAt"`
+	FinishedAt        string   `json:"finishedAt"`
+	DurationMs        int64    `json:"durationMs"`
+}
+
+type UpstreamImportHistoryDetail struct {
+	Record UpstreamImportHistoryRecord `json:"record"`
+	Items  []ImportUpstreamProductItem `json:"items"`
+}
+
+type UpstreamImportHistoryListResponse struct {
+	Items []UpstreamImportHistoryRecord `json:"items"`
+	Total int                           `json:"total"`
 }
 
 type PriceOptionInput struct {

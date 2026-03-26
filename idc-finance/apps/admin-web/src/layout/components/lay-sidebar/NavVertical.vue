@@ -12,11 +12,14 @@ const permissionStore = usePermissionStore();
 const settingsStore = useSettingsStore();
 
 const activeMenu = computed(() => route.path);
-const brandTitle = computed(() =>
-  pickLabel(localeStore.locale, settingsStore.title, settingsStore.titleEn)
-);
-const brandSubtitle = computed(() =>
-  pickLabel(localeStore.locale, settingsStore.subtitle, settingsStore.subtitleEn)
+const brandTitle = computed(() => pickLabel(localeStore.locale, settingsStore.title, settingsStore.titleEn));
+const brandSubtitle = computed(() => pickLabel(localeStore.locale, settingsStore.subtitle, settingsStore.subtitleEn));
+const footerText = computed(() =>
+  pickLabel(
+    localeStore.locale,
+    "系统 100% AI 开发\n著作权归江苏白猿网络科技有限公司所有\n官网：www.bysat.com",
+    "100% AI-developed system\nCopyright owned by Jiangsu Baiyuan Network Technology Co., Ltd.\nWebsite: www.bysat.com"
+  )
 );
 
 function handleSelect(path: string) {
@@ -27,7 +30,7 @@ function handleSelect(path: string) {
 <template>
   <aside class="shell-sidebar">
     <div class="menu-brand">
-      <div class="menu-brand__logo">IDC</div>
+      <div class="menu-brand__logo">BY</div>
       <div class="menu-brand__text">
         <div class="menu-brand__title">{{ brandTitle }}</div>
         <div class="menu-brand__subtitle">{{ brandSubtitle }}</div>
@@ -46,5 +49,9 @@ function handleSelect(path: string) {
         <MenuTreeItem v-for="item in permissionStore.menus" :key="item.id" :item="item" />
       </el-menu>
     </el-scrollbar>
+
+    <div class="portal-sidebar__footer" style="white-space: pre-line">
+      {{ footerText }}
+    </div>
   </aside>
 </template>

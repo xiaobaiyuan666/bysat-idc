@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { loadAccount, type PortalAccount } from "@/api/portal";
 import { pickLabel } from "@/locales";
 import { useLocaleStore } from "@/store";
@@ -10,9 +11,13 @@ import {
 } from "@/utils/business";
 
 const localeStore = useLocaleStore();
+const router = useRouter();
 const loading = ref(true);
 const error = ref("");
 const account = ref<PortalAccount | null>(null);
+
+const identityStatus = computed(() => account.value?.customer.identity?.verifyStatus ?? "");
+const contactCount = computed(() => account.value?.customer.contacts?.length ?? 0);
 
 const copy = computed(() => ({
   title: pickLabel(localeStore.locale, "账户中心", "Account Center"),
@@ -42,6 +47,7 @@ const copy = computed(() => ({
     "优先用于账单通知、工单和业务联系。",
     "Used first for invoice, ticket, and service communication."
   ),
+  allContacts: pickLabel(localeStore.locale, "联系人列表", "Contacts"),
   customerNo: pickLabel(localeStore.locale, "客户编号", "Customer No."),
   email: pickLabel(localeStore.locale, "邮箱", "Email"),
   mobile: pickLabel(localeStore.locale, "手机", "Mobile"),
@@ -54,7 +60,12 @@ const copy = computed(() => ({
   reviewRemark: pickLabel(localeStore.locale, "审核备注", "Review Remark"),
   name: pickLabel(localeStore.locale, "姓名", "Name"),
   role: pickLabel(localeStore.locale, "角色", "Role"),
-  loadError: pickLabel(localeStore.locale, "账户信息加载失败", "Failed to load account")
+  contacts: pickLabel(localeStore.locale, "联系人数量", "Contacts"),
+  identity: pickLabel(localeStore.locale, "实名状态", "Identity Status"),
+  loadError: pickLabel(localeStore.locale, "账户信息加载失败", "Failed to load account"),
+  goWallet: pickLabel(localeStore.locale, "钱包中心", "Wallet"),
+  goOrders: pickLabel(localeStore.locale, "订单中心", "Orders"),
+  goTickets: pickLabel(localeStore.locale, "工单中心", "Tickets")
 }));
 
 async function fetchAccount() {
@@ -85,6 +96,12 @@ onMounted(fetchAccount);
         </div>
       </div>
 
+      <div class="portal-toolbar" style="margin-top: 18px">
+        <el-button type="primary" plain @click="router.push('/wallet')">{{ copy.goWallet }}</el-button>
+        <el-button plain @click="router.push('/orders')">{{ copy.goOrders }}</el-button>
+        <el-button plain @click="router.push('/tickets')">{{ copy.goTickets }}</el-button>
+      </div>
+
       <div class="portal-grid portal-grid--three" style="margin-top: 20px">
         <div class="portal-stat">
           <h3>{{ copy.customerName }}</h3>
@@ -97,6 +114,14 @@ onMounted(fetchAccount);
         <div class="portal-stat">
           <h3>{{ copy.balance }}</h3>
           <strong>{{ formatPortalMoney(localeStore.locale, account.wallet.balance) }}</strong>
+        </div>
+        <div class="portal-stat">
+          <h3>{{ copy.contacts }}</h3>
+          <strong>{{ contactCount }}</strong>
+        </div>
+        <div class="portal-stat">
+          <h3>{{ copy.identity }}</h3>
+          <strong>{{ formatPortalIdentityStatus(localeStore.locale, identityStatus) || "-" }}</strong>
         </div>
       </div>
     </section>
@@ -111,24 +136,12 @@ onMounted(fetchAccount);
         </div>
 
         <el-descriptions :column="1" border style="margin-top: 18px">
-          <el-descriptions-item :label="copy.customerNo">
-            {{ account.customer.customerNo }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="copy.email">
-            {{ account.customer.email }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="copy.mobile">
-            {{ account.customer.mobile }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="copy.groupName">
-            {{ account.customer.groupName || "-" }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="copy.levelName">
-            {{ account.customer.levelName || "-" }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="copy.salesOwner">
-            {{ account.customer.salesOwner || "-" }}
-          </el-descriptions-item>
+          <el-descriptions-item :label="copy.customerNo">{{ account.customer.customerNo }}</el-descriptions-item>
+          <el-descriptions-item :label="copy.email">{{ account.customer.email }}</el-descriptions-item>
+          <el-descriptions-item :label="copy.mobile">{{ account.customer.mobile }}</el-descriptions-item>
+          <el-descriptions-item :label="copy.groupName">{{ account.customer.groupName || "-" }}</el-descriptions-item>
+          <el-descriptions-item :label="copy.levelName">{{ account.customer.levelName || "-" }}</el-descriptions-item>
+          <el-descriptions-item :label="copy.salesOwner">{{ account.customer.salesOwner || "-" }}</el-descriptions-item>
         </el-descriptions>
       </article>
 
@@ -141,20 +154,14 @@ onMounted(fetchAccount);
         </div>
 
         <el-descriptions :column="1" border style="margin-top: 18px">
-          <el-descriptions-item :label="copy.subjectName">
-            {{ account.customer.identity?.subjectName ?? "-" }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="copy.certNo">
-            {{ account.customer.identity?.certNo ?? "-" }}
-          </el-descriptions-item>
+          <el-descriptions-item :label="copy.subjectName">{{ account.customer.identity?.subjectName ?? "-" }}</el-descriptions-item>
+          <el-descriptions-item :label="copy.certNo">{{ account.customer.identity?.certNo ?? "-" }}</el-descriptions-item>
           <el-descriptions-item :label="copy.verifyStatus">
             <el-tag type="info" effect="plain">
               {{ formatPortalIdentityStatus(localeStore.locale, account.customer.identity?.verifyStatus ?? "") }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item :label="copy.reviewRemark">
-            {{ account.customer.identity?.reviewRemark ?? "-" }}
-          </el-descriptions-item>
+          <el-descriptions-item :label="copy.reviewRemark">{{ account.customer.identity?.reviewRemark ?? "-" }}</el-descriptions-item>
         </el-descriptions>
       </article>
     </section>
@@ -168,19 +175,26 @@ onMounted(fetchAccount);
       </div>
 
       <el-descriptions :column="2" border style="margin-top: 18px">
-        <el-descriptions-item :label="copy.name">
-          {{ account.primaryContact?.name ?? "-" }}
-        </el-descriptions-item>
-        <el-descriptions-item :label="copy.role">
-          {{ account.primaryContact?.roleName ?? "-" }}
-        </el-descriptions-item>
-        <el-descriptions-item :label="copy.email">
-          {{ account.primaryContact?.email ?? "-" }}
-        </el-descriptions-item>
-        <el-descriptions-item :label="copy.mobile">
-          {{ account.primaryContact?.mobile ?? "-" }}
-        </el-descriptions-item>
+        <el-descriptions-item :label="copy.name">{{ account.primaryContact?.name ?? "-" }}</el-descriptions-item>
+        <el-descriptions-item :label="copy.role">{{ account.primaryContact?.roleName ?? "-" }}</el-descriptions-item>
+        <el-descriptions-item :label="copy.email">{{ account.primaryContact?.email ?? "-" }}</el-descriptions-item>
+        <el-descriptions-item :label="copy.mobile">{{ account.primaryContact?.mobile ?? "-" }}</el-descriptions-item>
       </el-descriptions>
+    </section>
+
+    <section v-if="account?.customer.contacts?.length" class="portal-card" style="margin-top: 20px">
+      <div class="portal-card-head">
+        <div>
+          <h2 class="portal-panel__title">{{ copy.allContacts }}</h2>
+        </div>
+      </div>
+
+      <el-table :data="account.customer.contacts" border style="margin-top: 18px">
+        <el-table-column prop="name" :label="copy.name" min-width="140" />
+        <el-table-column prop="roleName" :label="copy.role" min-width="140" />
+        <el-table-column prop="email" :label="copy.email" min-width="220" />
+        <el-table-column prop="mobile" :label="copy.mobile" min-width="160" />
+      </el-table>
     </section>
   </div>
 </template>

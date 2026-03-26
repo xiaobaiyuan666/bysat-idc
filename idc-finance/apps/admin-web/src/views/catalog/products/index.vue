@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import StatusTabs from "@/components/workbench/StatusTabs.vue";
@@ -23,6 +23,7 @@ import {
 type TabKey = "ALL" | "ACTIVE" | "INACTIVE" | "LOCAL" | "MOFANG_CLOUD" | "ZJMF_API";
 
 const router = useRouter();
+const route = useRoute();
 
 const loading = ref(false);
 const syncing = ref(false);
@@ -64,7 +65,8 @@ const filters = reactive({
   groupName: "",
   status: "",
   productType: "",
-  channel: ""
+  channel: "",
+  providerAccountId: ""
 });
 
 const financeAccounts = computed(() =>
@@ -121,6 +123,7 @@ const importPreview = computed(() => {
 const filteredProducts = computed(() =>
   products.value.filter(item => {
     const keyword = filters.keyword.trim().toLowerCase();
+    const providerAccountId = Number(filters.providerAccountId);
     const keywordMatched =
       !keyword ||
       item.name.toLowerCase().includes(keyword) ||
@@ -131,11 +134,23 @@ const filteredProducts = computed(() =>
     const statusMatched = !filters.status || item.status === filters.status;
     const typeMatched = !filters.productType || item.productType === filters.productType;
     const channelMatched = !filters.channel || item.automationConfig.channel === filters.channel;
+    const providerAccountMatched =
+      !filters.providerAccountId ||
+      item.automationConfig.providerAccountId === providerAccountId ||
+      item.upstreamMapping.providerAccountId === providerAccountId;
     const tabMatched =
       activeTab.value === "ALL" ||
       item.status === activeTab.value ||
       item.automationConfig.channel === activeTab.value;
-    return keywordMatched && groupMatched && statusMatched && typeMatched && channelMatched && tabMatched;
+    return (
+      keywordMatched &&
+      groupMatched &&
+      statusMatched &&
+      typeMatched &&
+      channelMatched &&
+      providerAccountMatched &&
+      tabMatched
+    );
   })
 );
 
@@ -242,6 +257,26 @@ function resetFilters() {
   filters.status = "";
   filters.productType = "";
   filters.channel = "";
+  filters.providerAccountId = "";
+}
+
+function readRouteQueryValue(value: unknown) {
+  if (Array.isArray(value)) return String(value[0] ?? "");
+  if (value === undefined || value === null) return "";
+  return String(value);
+}
+
+function syncFiltersFromRoute() {
+  const providerAccountId = readRouteQueryValue(route.query.providerAccountId);
+  const providerType = readRouteQueryValue(route.query.providerType).toUpperCase();
+  const keywordFromRoute = readRouteQueryValue(route.query.keyword);
+
+  filters.providerAccountId = providerAccountId;
+  filters.keyword = keywordFromRoute;
+  filters.channel = ["LOCAL", "MOFANG_CLOUD", "ZJMF_API", "RESOURCE", "MANUAL"].includes(providerType)
+    ? providerType
+    : "";
+  advancedVisible.value = Boolean(providerAccountId || filters.channel);
 }
 
 function ensureImportAccount() {
@@ -559,8 +594,16 @@ watch(
 );
 
 onMounted(() => {
+  syncFiltersFromRoute();
   void loadProducts();
 });
+
+watch(
+  () => route.fullPath,
+  () => {
+    syncFiltersFromRoute();
+  }
+);
 </script>
 
 <template>
@@ -621,6 +664,14 @@ onMounted(() => {
             <el-option label="上下游" value="ZJMF_API" />
             <el-option label="资源池" value="RESOURCE" />
             <el-option label="手动资源" value="MANUAL" />
+          </el-select>
+          <el-select v-model="filters.providerAccountId" placeholder="接口账户" clearable>
+            <el-option
+              v-for="item in providerAccounts"
+              :key="item.id"
+              :label="accountLabel(item.id)"
+              :value="String(item.id)"
+            />
           </el-select>
         </div>
       </template>

@@ -1,5 +1,5 @@
-<script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+﻿<script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
@@ -13,6 +13,7 @@ import {
 
 const route = useRoute();
 const router = useRouter();
+
 const loading = ref(false);
 const detailLoading = ref(false);
 const retryingTaskId = ref(0);
@@ -56,7 +57,8 @@ const taskTypeOptions = [
 const channelOptions = [
   { label: "全部", value: "" },
   { label: "魔方云", value: "MOFANG_CLOUD" },
-  { label: "上下游财务", value: "ZJMF_API" },
+  { label: "上游财务", value: "ZJMF_API" },
+  { label: "WHMCS", value: "WHMCS" },
   { label: "资源池", value: "RESOURCE" },
   { label: "人工交付", value: "MANUAL" },
   { label: "本地", value: "LOCAL" }
@@ -68,7 +70,7 @@ const stageOptions = [
   { label: "执行中", value: "RUNNING" },
   { label: "同步", value: "SYNC" },
   { label: "财务", value: "FINANCE" },
-  { label: "付款后开通", value: "AFTER_PAYMENT" },
+  { label: "支付后开通", value: "AFTER_PAYMENT" },
   { label: "手工操作", value: "MANUAL" },
   { label: "回调", value: "CALLBACK" },
   { label: "完成", value: "DONE" },
@@ -92,6 +94,23 @@ const summary = computed(
   () => response.value?.summary ?? { total: 0, running: 0, success: 0, failed: 0, blocked: 0 }
 );
 const tasks = computed(() => response.value?.items ?? []);
+const pendingCount = computed(() => tasks.value.filter(item => item.status === "PENDING").length);
+const retryableCount = computed(() =>
+  tasks.value.filter(item => ["FAILED", "BLOCKED", "PENDING"].includes(item.status)).length
+);
+
+const routeContext = computed(() => {
+  const entries: Array<{ label: string; value: string }> = [];
+  if (filters.serviceId) entries.push({ label: "服务", value: String(filters.serviceId) });
+  if (filters.orderId) entries.push({ label: "订单", value: String(filters.orderId) });
+  if (filters.invoiceId) entries.push({ label: "账单", value: String(filters.invoiceId) });
+  if (filters.sourceType) entries.push({ label: "来源类型", value: sourceTypeLabel(filters.sourceType) });
+  if (filters.sourceId) entries.push({ label: "来源 ID", value: String(filters.sourceId) });
+  if (filters.channel) entries.push({ label: "渠道", value: channelLabel(filters.channel) });
+  if (filters.status) entries.push({ label: "状态", value: statusLabel(filters.status) });
+  if (filters.taskType) entries.push({ label: "任务类型", value: taskTypeLabel(filters.taskType) });
+  return entries;
+});
 
 function statusType(status: string) {
   const mapping: Record<string, string> = {
@@ -131,12 +150,27 @@ function taskTypeLabel(type: string) {
 function channelLabel(channel: string) {
   const mapping: Record<string, string> = {
     MOFANG_CLOUD: "魔方云",
-    ZJMF_API: "上下游财务",
+    ZJMF_API: "上游财务",
+    WHMCS: "WHMCS",
     RESOURCE: "资源池",
     MANUAL: "人工交付",
     LOCAL: "本地"
   };
   return mapping[channel] ?? channel;
+}
+
+function sourceTypeLabel(type: string) {
+  const mapping: Record<string, string> = {
+    service: "服务",
+    order: "订单",
+    invoice: "账单",
+    customer: "客户",
+    product: "商品",
+    cron: "计划任务",
+    resource: "资源",
+    provider: "渠道"
+  };
+  return mapping[type] ?? (type || "-");
 }
 
 function safeJson(value: string) {
@@ -150,6 +184,30 @@ function safeJson(value: string) {
 
 function canRetry(task: AutomationTask) {
   return ["FAILED", "BLOCKED", "PENDING"].includes(task.status);
+}
+
+function readRouteQueryValue(value: unknown) {
+  if (Array.isArray(value)) return String(value[0] ?? "");
+  if (value === undefined || value === null) return "";
+  return String(value);
+}
+
+function syncFiltersFromRoute() {
+  const serviceId = readRouteQueryValue(route.query.serviceId);
+  const orderId = readRouteQueryValue(route.query.orderId);
+  const invoiceId = readRouteQueryValue(route.query.invoiceId);
+  const sourceId = readRouteQueryValue(route.query.sourceId);
+
+  filters.serviceId = serviceId ? Number(serviceId) : undefined;
+  filters.orderId = orderId ? Number(orderId) : undefined;
+  filters.invoiceId = invoiceId ? Number(invoiceId) : undefined;
+  filters.sourceId = sourceId ? Number(sourceId) : undefined;
+  filters.sourceType = readRouteQueryValue(route.query.sourceType);
+  filters.stage = readRouteQueryValue(route.query.stage).toUpperCase();
+  filters.channel = readRouteQueryValue(route.query.channel).toUpperCase();
+  filters.status = readRouteQueryValue(route.query.status).toUpperCase();
+  filters.taskType = readRouteQueryValue(route.query.taskType).toUpperCase();
+  filters.keyword = readRouteQueryValue(route.query.keyword);
 }
 
 async function loadTasks() {
@@ -184,7 +242,7 @@ function resetFilters() {
   filters.invoiceId = undefined;
   filters.serviceId = undefined;
   filters.keyword = "";
-  void loadTasks();
+  void router.push({ path: "/providers/automation", query: {} });
 }
 
 async function openDetail(task: AutomationTask) {
@@ -221,37 +279,59 @@ async function retryTask(task: AutomationTask) {
 
 function jumpToService(serviceId?: number) {
   if (!serviceId) return;
-  router.push(`/services/detail/${serviceId}`);
+  void router.push(`/services/detail/${serviceId}`);
 }
 
 function jumpToOrder(orderId?: number) {
   if (!orderId) return;
-  router.push(`/orders/detail/${orderId}`);
+  void router.push(`/orders/detail/${orderId}`);
 }
 
 function jumpToInvoice(invoiceId?: number) {
   if (!invoiceId) return;
-  router.push(`/billing/invoices/${invoiceId}`);
+  void router.push(`/billing/invoices/${invoiceId}`);
+}
+
+function jumpToAccount(task?: Partial<AutomationTask> | null) {
+  if (!task) return;
+  const query: Record<string, string> = {};
+  const providerType = task.providerType || task.channel;
+  if (providerType) query.providerType = providerType;
+  if (task.sourceType === "provider" && task.sourceId) query.accountId = String(task.sourceId);
+  void router.push({ path: "/providers/accounts", query });
+}
+
+function jumpToResources(task?: Partial<AutomationTask> | null) {
+  if (!task) return;
+  const query: Record<string, string> = {};
+  const providerType = task.providerType || task.channel;
+  if (providerType) query.providerType = providerType;
+  if (task.serviceId) query.serviceId = String(task.serviceId);
+  if (task.sourceType === "provider" && task.sourceId) query.accountId = String(task.sourceId);
+  void router.push({ path: "/providers/resources", query });
 }
 
 function jumpToSettings() {
-  router.push("/providers/automation-settings");
+  void router.push("/providers/automation-settings");
 }
 
 onMounted(() => {
-  if (route.query.serviceId) filters.serviceId = Number(route.query.serviceId);
-  if (route.query.orderId) filters.orderId = Number(route.query.orderId);
-  if (route.query.invoiceId) filters.invoiceId = Number(route.query.invoiceId);
-  if (route.query.sourceId) filters.sourceId = Number(route.query.sourceId);
-  if (route.query.sourceType) filters.sourceType = String(route.query.sourceType);
-  if (route.query.stage) filters.stage = String(route.query.stage);
+  syncFiltersFromRoute();
   void loadTasks();
 });
+
+watch(
+  () => route.fullPath,
+  () => {
+    syncFiltersFromRoute();
+    void loadTasks();
+  }
+);
 </script>
 
 <template>
   <PageWorkbench
-    eyebrow="资源与商店 / 自动化"
+    eyebrow="接口与上游 / 自动化"
     title="自动化任务中心"
     subtitle="集中查看自动开通、同步、资源动作和财务动作任务，统一追踪请求、结果和重试。"
   >
@@ -267,6 +347,10 @@ onMounted(() => {
           <span>任务总数</span>
           <strong>{{ summary.total }}</strong>
         </div>
+        <div class="automation-metric">
+          <span>待执行</span>
+          <strong>{{ pendingCount }}</strong>
+        </div>
         <div class="automation-metric automation-metric--info">
           <span>执行中</span>
           <strong>{{ summary.running }}</strong>
@@ -280,8 +364,8 @@ onMounted(() => {
           <strong>{{ summary.failed }}</strong>
         </div>
         <div class="automation-metric automation-metric--warning">
-          <span>阻塞</span>
-          <strong>{{ summary.blocked }}</strong>
+          <span>可重试</span>
+          <strong>{{ retryableCount }}</strong>
         </div>
       </div>
     </template>
@@ -339,11 +423,37 @@ onMounted(() => {
       </el-form>
     </template>
 
+    <div class="page-card" v-if="routeContext.length">
+      <div class="context-panel">
+        <div>
+          <strong>当前已带入业务上下文</strong>
+          <div class="context-tags">
+            <el-tag v-for="item in routeContext" :key="`${item.label}-${item.value}`" effect="light">
+              {{ item.label }}：{{ item.value }}
+            </el-tag>
+          </div>
+        </div>
+        <div class="inline-actions">
+          <el-button v-if="filters.serviceId" plain @click="jumpToService(filters.serviceId)">查看服务</el-button>
+          <el-button v-if="filters.orderId" plain @click="jumpToOrder(filters.orderId)">查看订单</el-button>
+          <el-button v-if="filters.invoiceId" plain @click="jumpToInvoice(filters.invoiceId)">查看账单</el-button>
+          <el-button
+            v-if="filters.sourceType === 'provider' && filters.sourceId"
+            plain
+            @click="jumpToAccount({ sourceType: 'provider', sourceId: filters.sourceId, channel: filters.channel })"
+          >
+            查看接口账户
+          </el-button>
+          <el-button type="primary" plain @click="resetFilters">退出上下文</el-button>
+        </div>
+      </div>
+    </div>
+
     <div class="page-card" v-loading="loading">
       <div class="page-header">
         <div>
           <h3 class="page-header__title">任务列表</h3>
-          <p class="page-header__desc">失败或阻塞的任务可以直接在这里重新提交。</p>
+          <p class="page-header__desc">失败或阻塞的任务可以直接在这里重新提交，也可以沿着服务、账单和渠道继续追查。</p>
         </div>
       </div>
 
@@ -353,8 +463,11 @@ onMounted(() => {
           <template #default="{ row }">{{ taskTypeLabel(row.taskType) }}</template>
         </el-table-column>
         <el-table-column prop="title" label="标题" min-width="220" show-overflow-tooltip />
-        <el-table-column label="渠道" min-width="140">
+        <el-table-column label="渠道" min-width="120">
           <template #default="{ row }">{{ channelLabel(row.channel) }}</template>
+        </el-table-column>
+        <el-table-column label="来源" min-width="140">
+          <template #default="{ row }">{{ sourceTypeLabel(row.sourceType) }}</template>
         </el-table-column>
         <el-table-column prop="stage" label="阶段" min-width="120" />
         <el-table-column label="状态" min-width="100">
@@ -367,13 +480,19 @@ onMounted(() => {
         <el-table-column prop="operatorName" label="执行方" min-width="120" />
         <el-table-column prop="createdAt" label="创建时间" min-width="170" />
         <el-table-column prop="message" label="执行结果" min-width="260" show-overflow-tooltip />
-        <el-table-column label="操作" min-width="280" fixed="right">
+        <el-table-column label="操作" min-width="360" fixed="right">
           <template #default="{ row }">
             <div class="inline-actions">
               <el-button type="primary" link @click="openDetail(row)">详情</el-button>
               <el-button v-if="row.serviceId" type="primary" link @click="jumpToService(row.serviceId)">服务</el-button>
               <el-button v-if="row.orderId" type="primary" link @click="jumpToOrder(row.orderId)">订单</el-button>
               <el-button v-if="row.invoiceId" type="primary" link @click="jumpToInvoice(row.invoiceId)">账单</el-button>
+              <el-button v-if="row.sourceType === 'provider' || row.serviceId" type="primary" link @click="jumpToResources(row)">
+                渠道资源
+              </el-button>
+              <el-button v-if="row.sourceType === 'provider'" type="primary" link @click="jumpToAccount(row)">
+                接口账户
+              </el-button>
               <el-button
                 v-if="canRetry(row)"
                 type="warning"
@@ -389,7 +508,7 @@ onMounted(() => {
       </el-table>
     </div>
 
-    <el-drawer v-model="detailVisible" size="720px" :with-header="false">
+    <el-drawer v-model="detailVisible" size="760px" :with-header="false">
       <div v-loading="detailLoading" class="drawer-panel">
         <div class="page-header">
           <div>
@@ -397,7 +516,20 @@ onMounted(() => {
             <p class="page-header__desc">查看请求参数、执行结果和关联对象。</p>
           </div>
           <div class="inline-actions" v-if="detail">
-            <el-button v-if="canRetry(detail)" type="warning" plain :loading="retryingTaskId === detail.id" @click="retryTask(detail)">
+            <el-button v-if="detail.serviceId" plain @click="jumpToService(detail.serviceId)">服务</el-button>
+            <el-button v-if="detail.orderId" plain @click="jumpToOrder(detail.orderId)">订单</el-button>
+            <el-button v-if="detail.invoiceId" plain @click="jumpToInvoice(detail.invoiceId)">账单</el-button>
+            <el-button v-if="detail.sourceType === 'provider' || detail.serviceId" plain @click="jumpToResources(detail)">
+              渠道资源
+            </el-button>
+            <el-button v-if="detail.sourceType === 'provider'" plain @click="jumpToAccount(detail)">接口账户</el-button>
+            <el-button
+              v-if="canRetry(detail)"
+              type="warning"
+              plain
+              :loading="retryingTaskId === detail.id"
+              @click="retryTask(detail)"
+            >
               重新提交
             </el-button>
           </div>
@@ -411,19 +543,43 @@ onMounted(() => {
             <el-descriptions-item label="状态">
               <el-tag :type="statusType(detail.status)" effect="light">{{ statusLabel(detail.status) }}</el-tag>
             </el-descriptions-item>
-            <el-descriptions-item label="来源类型">{{ detail.sourceType || "-" }}</el-descriptions-item>
+            <el-descriptions-item label="来源类型">{{ sourceTypeLabel(detail.sourceType) }}</el-descriptions-item>
             <el-descriptions-item label="来源 ID">{{ detail.sourceId || "-" }}</el-descriptions-item>
             <el-descriptions-item label="订单 ID">{{ detail.orderId || "-" }}</el-descriptions-item>
             <el-descriptions-item label="账单 ID">{{ detail.invoiceId || "-" }}</el-descriptions-item>
             <el-descriptions-item label="服务 ID">{{ detail.serviceId || "-" }}</el-descriptions-item>
             <el-descriptions-item label="服务号">{{ detail.serviceNo || "-" }}</el-descriptions-item>
-            <el-descriptions-item label="资源提供方">{{ detail.providerType || "-" }}</el-descriptions-item>
+            <el-descriptions-item label="资源渠道">{{ channelLabel(detail.providerType || detail.channel) }}</el-descriptions-item>
             <el-descriptions-item label="远端资源 ID">{{ detail.providerResourceId || "-" }}</el-descriptions-item>
             <el-descriptions-item label="执行动作">{{ detail.actionName || "-" }}</el-descriptions-item>
             <el-descriptions-item label="执行方">{{ detail.operatorName || "-" }}</el-descriptions-item>
             <el-descriptions-item label="创建时间">{{ detail.createdAt || "-" }}</el-descriptions-item>
             <el-descriptions-item label="完成时间">{{ detail.finishedAt || "-" }}</el-descriptions-item>
           </el-descriptions>
+
+          <div class="portal-grid portal-grid--two" style="margin-top: 16px">
+            <div class="panel-card">
+              <div class="section-card__head">
+                <strong>关联工作台</strong>
+                <span class="section-card__meta">按任务上下文继续排查服务、账单和渠道侧问题。</span>
+              </div>
+              <div class="inline-actions inline-actions--stack">
+                <el-button v-if="detail.serviceId" plain @click="jumpToService(detail.serviceId)">打开服务工作台</el-button>
+                <el-button v-if="detail.orderId" plain @click="jumpToOrder(detail.orderId)">打开订单工作台</el-button>
+                <el-button v-if="detail.invoiceId" plain @click="jumpToInvoice(detail.invoiceId)">打开账单工作台</el-button>
+                <el-button v-if="detail.sourceType === 'provider'" plain @click="jumpToAccount(detail)">打开接口账户</el-button>
+                <el-button v-if="detail.sourceType === 'provider' || detail.serviceId" type="primary" plain @click="jumpToResources(detail)">
+                  打开渠道资源
+                </el-button>
+              </div>
+            </div>
+            <div class="panel-card">
+              <div class="section-card__head">
+                <strong>执行说明</strong>
+              </div>
+              <el-alert :title="detail.message || '该任务当前没有额外说明'" type="info" :closable="false" show-icon />
+            </div>
+          </div>
 
           <div class="portal-grid portal-grid--two" style="margin-top: 16px">
             <div class="panel-card">
@@ -444,3 +600,107 @@ onMounted(() => {
     </el-drawer>
   </PageWorkbench>
 </template>
+
+<style scoped>
+.automation-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.automation-metric {
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: #f6f8fb;
+  border: 1px solid #e5ebf5;
+  display: grid;
+  gap: 8px;
+}
+
+.automation-metric span {
+  font-size: 13px;
+  color: #60708a;
+}
+
+.automation-metric strong {
+  font-size: 28px;
+  line-height: 1;
+  color: #1f2a37;
+}
+
+.automation-metric--info {
+  background: #eef6ff;
+  border-color: #cfe3ff;
+}
+
+.automation-metric--success {
+  background: #edf9f1;
+  border-color: #cfead9;
+}
+
+.automation-metric--danger {
+  background: #fff1f1;
+  border-color: #f4cccc;
+}
+
+.automation-metric--warning {
+  background: #fff8e8;
+  border-color: #f1ddaa;
+}
+
+.automation-filter {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.context-panel {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.context-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.inline-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.inline-actions--stack {
+  align-items: flex-start;
+}
+
+.json-block {
+  margin: 0;
+  border-radius: 16px;
+  padding: 14px;
+  background: #0f172a;
+  color: #d7e1f3;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 220px;
+}
+
+@media (max-width: 1280px) {
+  .automation-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .automation-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+</style>

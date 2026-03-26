@@ -64,7 +64,9 @@ const paymentChannelLabels: Record<string, LabelPair> = {
   MANUAL: { zh: "线下收款", en: "Manual Payment" },
   ALIPAY: { zh: "支付宝", en: "Alipay" },
   WECHAT: { zh: "微信支付", en: "WeChat Pay" },
-  BALANCE: { zh: "余额抵扣", en: "Balance" }
+  BALANCE: { zh: "余额抵扣", en: "Balance" },
+  ONLINE: { zh: "在线支付", en: "Online Payment" },
+  SYSTEM: { zh: "系统处理", en: "System" }
 };
 
 const changeOrderActionLabels: Record<string, LabelPair> = {
