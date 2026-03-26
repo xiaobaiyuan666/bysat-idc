@@ -1,81 +1,51 @@
-# MySQL 本地初始化
+# MySQL 安装与初始化
 
-这份文档只保留通用初始化步骤，不再记录某台机器的安装路径、账号密码或本地目录。
+本项目要求 `MySQL 8.x`，字符集必须使用 `utf8mb4`。
 
-真实 MySQL 凭据请放在未提交的 `.env.local` 中。
-
-## 建议版本
-
-- MySQL `8.x`
-- 数据库字符集：`utf8mb4`
-
-## 1. 创建数据库和项目账号
-
-下面是一个可直接改造的示例：
+## 1. 创建数据库
 
 ```sql
-CREATE DATABASE IF NOT EXISTS idc_finance
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
-CREATE USER IF NOT EXISTS 'idc_finance'@'%' IDENTIFIED BY 'change-me';
-GRANT ALL PRIVILEGES ON idc_finance.* TO 'idc_finance'@'%';
-FLUSH PRIVILEGES;
+CREATE DATABASE idc_finance CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-如果你只允许本机连接，也可以把 `'%'` 改成 `'localhost'` 或 `'127.0.0.1'`。
+## 2. 配置项目连接
 
-## 2. 填写本地环境变量
-
-先复制模板：
-
-```bash
-cp .env.example .env.local
-```
-
-然后把 `.env.local` 改成 MySQL 模式，例如：
+在 `.env.local` 中填写：
 
 ```env
 STORAGE_DRIVER=mysql
 STORAGE_STRICT=true
-MYSQL_DSN=idc_finance:change-me@tcp(127.0.0.1:3306)/idc_finance?parseTime=true&charset=utf8mb4
+MYSQL_DSN=idc_finance:你的密码@tcp(127.0.0.1:3306)/idc_finance?parseTime=true&charset=utf8mb4
 ```
 
-## 3. 执行迁移和演示数据
+## 3. 执行迁移
 
-在工作区目录执行：
+只安装表结构：
+
+```bash
+npm run db:migrate:mysql
+```
+
+安装表结构并导入演示数据：
 
 ```bash
 npm run db:prepare:mysql
 ```
 
-如果你只想分开执行，也可以：
-
-```bash
-npm run db:migrate:mysql
-npm run db:seed:mysql
-```
-
-## 4. 以 MySQL 模式启动 API
+## 4. 启动 API
 
 ```bash
 npm run dev:api:mysql
 ```
 
-## 5. 初始化后的效果
+健康检查：
 
-初始化完成后，MySQL 中会有一套可直接演示和联调的数据，覆盖：
-
-- 商品、价格矩阵、配置项、资源模板
-- 客户、联系人、实名状态
-- 工单
-- 订单、账单、支付、服务
-- Provider 账号
-- Provider 同步日志与资源明细
-- 自动化任务与改配单示例
+```bash
+curl http://127.0.0.1:18080/api/v1/health
+```
 
 ## 说明
 
-- `.env.local` 已被 `.gitignore` 忽略，可以存放当前机器的真实 DSN。
-- `STORAGE_STRICT=true` 时，如果 MySQL 不可用，API 会直接退出，不再静默回退到内存仓储。
-- 如果只做页面开发或不需要持久化联调，可以改回 `STORAGE_DRIVER=memory`。
+- GitHub 仓库不提交你的本地 MySQL 数据目录、运行日志和 `.env.local`
+- `seed/mysql` 里的 SQL 是通用演示数据，不是本地真实生产数据
+- 如果只想要纯净项目，请只执行迁移，不执行 seed

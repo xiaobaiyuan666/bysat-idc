@@ -29,8 +29,8 @@ const mysqlStatus = computed(() => pickLabel(localeStore.locale, "MySQL 在线",
 const productSubtitle = computed(() =>
   pickLabel(
     localeStore.locale,
-    "江苏白猿网络科技有限公司 · 猿创软件业务组",
-    "Jiangsu Baiyuan Network Technology Co., Ltd. · Yuanchuang Software Business Group"
+    "江苏白猿网络科技有限公司-猿创软件开发",
+    "Jiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Development"
   )
 );
 const roleLabel = computed(() => pickLabel(localeStore.locale, "系统管理员", "System Admin"));

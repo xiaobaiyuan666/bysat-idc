@@ -7,3 +7,7 @@ tmp/
 *.log
 *.exe
 bin/
+.runtime/
+data/*.json
+.playwright-cli/
+tmp-api.exe~

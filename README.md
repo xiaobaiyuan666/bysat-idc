@@ -1,51 +1,32 @@
-# 无穷云 IDC 系统
+# 无穷云IDC业务管理系统
 
-当前仓库已经整理为单一主线：[`idc-finance`](/Users/a1/Documents/codex/bysat-idc/idc-finance)。
+江苏白猿网络科技有限公司-猿创软件开发
 
-这套系统现在统一命名为“无穷云 IDC 系统”，当前代码基线为 AI 生成并在此仓库内持续演进。
+这个仓库当前的主线项目位于 [`idc-finance`](./idc-finance)。
 
-当前仓库保持私有，用于在系统尚未开发完成前存放主线代码、续开发文档和演示资料。
+## 仓库定位
 
-## 当前入口
+- GitHub 用途是分发项目源码、迁移脚本、可选演示 seed 和安装文档。
+- 不提交本地开发环境状态，例如 `.env.local`、运行日志、`.runtime/`、`data/*.json`、本地数据库文件和临时二进制。
+- `seed/mysql` 中的内容是通用演示数据，不是本地真实测试环境快照。
 
-- 后台：`http://localhost:5177`
-- 用户端：`http://localhost:5178`
-- API：`http://localhost:18080/api/v1/health`
+## 主要项目
 
-## 默认账号
+- 后端 API：`idc-finance/apps/api`
+- 管理后台：`idc-finance/apps/admin-web`
+- 用户中心：`idc-finance/apps/portal-web`
+- 业务模块：`idc-finance/internal`
+- 数据库迁移：`idc-finance/migrations/mysql`
+- 演示数据：`idc-finance/seed/mysql`
 
-- 后台：`admin / Admin123!`
-- 用户端：`portal / Portal123!`
+## 快速入口
 
-## 启动
+- 项目说明：[idc-finance/README.md](./idc-finance/README.md)
+- GitHub 拉取安装说明：[idc-finance/docs/INSTALL.md](./idc-finance/docs/INSTALL.md)
+- MySQL 初始化说明：[idc-finance/docs/mysql-setup.md](./idc-finance/docs/mysql-setup.md)
 
-在仓库根目录可以直接执行：
+## 统一命名
 
-```bash
-npm run dev:api
-npm run dev:admin
-npm run dev:portal
-```
-
-也可以直接进入 [`idc-finance`](/Users/a1/Documents/codex/bysat-idc/idc-finance) 目录启动。
-
-如果是新设备第一次启动，先阅读 [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)，并按模板创建本地 `idc-finance/.env.local`。
-
-## 说明
-
-- 根目录只保留当前开发还会继续用到的入口和说明文件
-- 当前保留的补充文档只剩魔方云接口与门户同步两份说明，位于 [`docs`](/Users/a1/Documents/codex/bysat-idc/docs)
-- 服务详情里的 `VNC` 已迁移到新后台，入口在新版后台的服务详情页 `远端实例 -> 获取控制台`
-
-## 续开发入口
-
-如果你换了编辑器、机器，或者中断一段时间后要继续开发，先按这个顺序阅读：
-
-1. [`docs/project-continuity.md`](/Users/a1/Documents/codex/bysat-idc/docs/project-continuity.md)
-2. [`docs/project-map.md`](/Users/a1/Documents/codex/bysat-idc/docs/project-map.md)
-3. [`docs/current-state.md`](/Users/a1/Documents/codex/bysat-idc/docs/current-state.md)
-4. [`docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md)
-5. [`docs/development-rules.md`](/Users/a1/Documents/codex/bysat-idc/docs/development-rules.md)
-6. [`docs/cross-device-collaboration.md`](/Users/a1/Documents/codex/bysat-idc/docs/cross-device-collaboration.md)
-7. [`docs/active-handoff.md`](/Users/a1/Documents/codex/bysat-idc/docs/active-handoff.md)
-8. [`idc-finance/README.md`](/Users/a1/Documents/codex/bysat-idc/idc-finance/README.md)
+- 中文名称：`无穷云IDC业务管理系统`
+- 英文名称：`Infinity Cloud IDC Management System`
+- 开发标识：`江苏白猿网络科技有限公司-猿创软件开发`

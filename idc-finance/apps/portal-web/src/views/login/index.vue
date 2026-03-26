@@ -16,12 +16,12 @@ const form = reactive({
 });
 
 const copy = computed(() => ({
-  badge: pickLabel(localeStore.locale, "白猿科技客户中心", "BYSAT Client Portal"),
-  title: pickLabel(localeStore.locale, "面向客户的云业务自助入口", "Self-service entry for cloud customers"),
+  badge: pickLabel(localeStore.locale, "无穷云IDC业务管理系统", "Infinity Cloud IDC Management System"),
+  title: pickLabel(localeStore.locale, "客户自助与业务服务入口", "Client self-service and business portal"),
   subtitle: pickLabel(
     localeStore.locale,
-    "江苏白猿网络科技有限公司 · 猿创软件业务组提供统一入口，用于查看服务、订单、账单、钱包和工单，支持续费、支付、状态查询和提交售后请求。",
-    "A unified portal by Jiangsu Baiyuan Network Technology Co., Ltd. for services, orders, invoices, wallet, and tickets."
+    "江苏白猿网络科技有限公司-猿创软件开发提供统一入口，用于查看服务、订单、账单、钱包和工单，支持续费、支付、状态查询和售后协同。",
+    "A unified portal by Jiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Development for services, orders, invoices, wallet, and tickets."
   ),
   statA: pickLabel(localeStore.locale, "客户自助", "Self Service"),
   statB: pickLabel(localeStore.locale, "统一", "Unified"),
@@ -34,8 +34,8 @@ const copy = computed(() => ({
   declarationTitle: pickLabel(localeStore.locale, "版权声明", "Copyright"),
   declarationText: pickLabel(
     localeStore.locale,
-    "本系统由江苏白猿网络科技有限公司 - 猿创软件业务组 100% AI 开发，全部著作权归江苏白猿网络科技有限公司所有。官网：www.bysat.com",
-    "This system is 100% AI-developed by Jiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Business Group, with full copyright owned by Jiangsu Baiyuan Network Technology Co., Ltd. Website: www.bysat.com"
+    "无穷云IDC业务管理系统由江苏白猿网络科技有限公司-猿创软件开发 100% AI 开发，全部著作权归江苏白猿网络科技有限公司所有。",
+    "Infinity Cloud IDC Management System is 100% AI-developed by Jiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Development, with full copyright owned by Jiangsu Baiyuan Network Technology Co., Ltd."
   ),
   username: pickLabel(localeStore.locale, "账号", "Username"),
   password: pickLabel(localeStore.locale, "密码", "Password"),

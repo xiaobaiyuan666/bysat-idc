@@ -47,7 +47,7 @@ const quickActions = computed(() => [
 ]);
 
 const copy = computed(() => ({
-  badge: pickLabel(localeStore.locale, "白猿科技客户中心", "BYSAT Client Portal"),
+  badge: pickLabel(localeStore.locale, "无穷云IDC业务管理系统", "Infinity Cloud IDC Management System"),
   title: pickLabel(localeStore.locale, "客户控制台", "Client Console"),
   subtitle: pickLabel(
     localeStore.locale,
@@ -56,8 +56,8 @@ const copy = computed(() => ({
   ),
   declaration: pickLabel(
     localeStore.locale,
-    "本系统由江苏白猿网络科技有限公司 · 猿创软件业务组 100% AI 开发，白猿科技享有 100% 著作权。官网：www.bysat.com",
-    "This system is 100% AI-developed by Jiangsu Baiyuan Network Technology Co., Ltd., with full copyright retained by the company."
+    "无穷云IDC业务管理系统由江苏白猿网络科技有限公司-猿创软件开发 100% AI 开发，全部著作权归江苏白猿网络科技有限公司所有。",
+    "Infinity Cloud IDC Management System is 100% AI-developed by Jiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Development, with full copyright owned by Jiangsu Baiyuan Network Technology Co., Ltd."
   ),
   quickActionTitle: pickLabel(localeStore.locale, "快捷入口", "Quick Actions"),
   quickActionDesc: pickLabel(localeStore.locale, "常用动作直接进入，不再在菜单里来回找。", "Jump straight to the most-used self-service actions."),

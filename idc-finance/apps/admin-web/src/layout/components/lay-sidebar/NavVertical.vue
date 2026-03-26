@@ -17,8 +17,8 @@ const brandSubtitle = computed(() => pickLabel(localeStore.locale, settingsStore
 const footerText = computed(() =>
   pickLabel(
     localeStore.locale,
-    "系统 100% AI 开发\n著作权归江苏白猿网络科技有限公司所有\n官网：www.bysat.com",
-    "100% AI-developed system\nCopyright owned by Jiangsu Baiyuan Network Technology Co., Ltd.\nWebsite: www.bysat.com"
+    "无穷云IDC业务管理系统\n江苏白猿网络科技有限公司-猿创软件开发\n100% AI 开发，著作权归江苏白猿网络科技有限公司所有",
+    "Infinity Cloud IDC Management System\nJiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Development\n100% AI-developed, copyright owned by Jiangsu Baiyuan Network Technology Co., Ltd."
   )
 );
 
@@ -30,7 +30,7 @@ function handleSelect(path: string) {
 <template>
   <aside class="shell-sidebar">
     <div class="menu-brand">
-      <div class="menu-brand__logo">BY</div>
+      <div class="menu-brand__logo">∞</div>
       <div class="menu-brand__text">
         <div class="menu-brand__title">{{ brandTitle }}</div>
         <div class="menu-brand__subtitle">{{ brandSubtitle }}</div>

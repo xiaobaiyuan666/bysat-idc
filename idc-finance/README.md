@@ -1,328 +1,143 @@
-# 无穷云 IDC 系统 Workspace
+# 无穷云IDC业务管理系统
 
-基于 `Go + Vue 3 + Element Plus + vue-pure-admin` 的无穷云 IDC 财务与云业务系统工作区。
+江苏白猿网络科技有限公司-猿创软件开发
 
-如果你是中断后重新接手这个项目，先回到根目录阅读：
+基于 `Go + Vue 3 + Element Plus + vue-pure-admin` 的 IDC 财务、服务、工单、订单、账单、资源与自动化管理系统。
 
-- `README.md`
-- `docs/project-continuity.md`
-- `docs/project-map.md`
-- `docs/current-state.md`
-- `docs/environment-setup.md`
-- `docs/development-rules.md`
+## 仓库说明
 
-## 目录
+- GitHub 仓库默认只保留项目源码、迁移脚本、可选演示 seed、开发文档。
+- 不提交本地开发环境数据，例如 `.env.local`、`.runtime/`、`data/*.json`、本地日志和临时二进制。
+- 演示数据是通用示例数据，不是你本地真实测试环境快照。
 
-- `apps/api`：Go API 服务
-- `apps/admin-web`：后台管理端
-- `apps/portal-web`：用户中心
-- `internal`：后端模块化业务代码
-- `migrations/mysql`：MySQL 迁移脚本
-- `seed/mysql`：MySQL 演示数据
-- `docs`：拆解、重建和执行计划文档
+## 目录结构
 
-## 当前阶段
+- `apps/api`: Go API 服务
+- `apps/admin-web`: 管理后台
+- `apps/portal-web`: 用户中心
+- `internal`: 后端业务模块
+- `migrations/mysql`: MySQL 迁移脚本
+- `seed/mysql`: 可选演示数据
+- `docs`: 安装、环境与分析文档
 
-当前已推进到 `Phase 8`，已完成：
+## 快速开始
 
-- Phase 1：认证、RBAC、菜单、审计日志、客户域、联系人、实名认证工作台
-- Phase 2：商品、订单、账单、支付、服务最小闭环
-- Phase 3：商品详情、订单详情、账单详情、后台登记收款
-- Phase 4：服务工作台、服务动作、账单退款与状态回写
-- Phase 5：价格矩阵、配置项、资源模板、支付记录、服务资源快照、实例动作
-- Phase 5.5：门户下单支持配置项选择和价格预览
-- Phase 6：MySQL 仓储入口、商品/订单/账单/服务/客户 MySQL 仓储、演示种子
-- Phase 7：审计日志 MySQL 持久化、MySQL 迁移与种子执行器
-- Phase 8：魔方云真实 Provider、实例拉取同步、资源落库、同步日志
-
-## 启动
-
-如果是新设备第一次接手，先按 [`../docs/environment-setup.md`](/Users/a1/Documents/codex/bysat-idc/docs/environment-setup.md) 准备环境，再回来启动本工作区。
-
-如果从仓库根目录启动：
+### 1. 安装依赖
 
 ```bash
-npm run dev:api
-npm run dev:admin
-npm run dev:portal
+npm install
+go mod download
 ```
+
+### 2. 配置环境变量
+
+复制 `.env.example` 为你自己的本地环境文件：
+
+```bash
+cp .env.example .env.local
+```
+
+核心变量示例：
+
+```env
+STORAGE_DRIVER=mysql
+STORAGE_STRICT=true
+MYSQL_DSN=idc_finance:IdcFinance!2026@tcp(127.0.0.1:3306)/idc_finance?parseTime=true&charset=utf8mb4
+```
+
+如果需要对接魔方云，再补充：
+
+```env
+MOFANG_CLOUD_BASE_URL=
+MOFANG_CLOUD_USERNAME=
+MOFANG_CLOUD_PASSWORD=
+MOFANG_CLOUD_LANG=zh-cn
+MOFANG_CLOUD_INSECURE_SKIP_VERIFY=true
+```
+
+### 3. 初始化数据库
+
+先手动创建数据库：
+
+```sql
+CREATE DATABASE idc_finance CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+只安装纯净项目：
+
+```bash
+npm run db:migrate:mysql
+```
+
+如果你需要演示数据：
+
+```bash
+npm run db:seed:mysql
+```
+
+或者一键完成迁移加演示数据：
+
+```bash
+npm run db:prepare:mysql
+```
+
+## 启动项目
 
 ### API
 
-macOS / Linux：
-
-```bash
-npm run dev:api:unix
-```
-
-或直接：
-
-```bash
-go run ./apps/api/cmd/server
-```
-
-Windows：
-
-```bash
-& "C:\Program Files\Go\bin\go.exe" run ./apps/api/cmd/server
-```
-
-或直接使用本地 MySQL 启动脚本：
-
 ```bash
 npm run dev:api:mysql
-```
-
-macOS / Linux 的 MySQL 模式：
-
-```bash
-npm run dev:api:mysql:unix
 ```
 
 健康检查：
 
 - `http://127.0.0.1:18080/api/v1/health`
 
-### 后台
+### 管理后台
 
 ```bash
-npm install
 npm run dev:admin
 ```
 
-访问地址：
-
-- `http://localhost:5177`
-
-默认账号：
-
-- `admin / Admin123!`
+- 地址：`http://localhost:5177`
+- 默认账号：`admin / Admin123!`
 
 ### 用户中心
 
 ```bash
-npm install
 npm run dev:portal
 ```
 
-访问地址：
+- 地址：`http://localhost:5178`
+- 默认账号：`portal / Portal123!`
 
-- `http://localhost:5178`
+## 是否包含演示数据
 
-默认账号：
+包含，但属于可选内容。
 
-- `portal / Portal123!`
+- `seed/mysql/0001_demo_data.sql`: 基础演示业务数据
+- `seed/mysql/0002_demo_finance_accounts.sql`: 财务账户演示数据
+- `seed/mysql/0003_demo_finance_cleanup.sql`: 财务演示数据修补
+- `seed/mysql/0004_demo_text_cleanup.sql`: 文本脏数据修补
 
-## 环境变量
+如果你想保持 GitHub 项目为纯净安装状态，只执行迁移，不执行 seed 即可。
 
-推荐先复制模板：
+## 安装文档
 
-```bash
-cp .env.example .env.local
-```
+- 通用安装说明：[docs/INSTALL.md](./docs/INSTALL.md)
+- MySQL 初始化说明：[docs/mysql-setup.md](./docs/mysql-setup.md)
 
-项目脚本只会自动加载本地的 `.env.local`。
+## 当前主线能力
 
-可提交模板文件：
+- 后台：客户、商品、订单、账单、支付、退款、服务、工单、Provider、报表、系统管理
+- 用户中心：控制台、商城、服务、订单、账单、工单、钱包、账户
+- 自动化：服务动作、改配单、自动关单、上游商品同步记录
+- 对接能力：魔方云、上游财务商品同步、多渠道 Provider 工作台
 
-- [`.env.example`](/Users/a1/Documents/codex/bysat-idc/idc-finance/.env.example)
-
-核心配置：
-
-- `STORAGE_DRIVER=memory`
-- `STORAGE_DRIVER=mysql`
-- `STORAGE_STRICT=true`
-- `MYSQL_DSN=idc_finance:password@tcp(127.0.0.1:3306)/idc_finance?parseTime=true&charset=utf8mb4`
-
-魔方云配置：
-
-- `MOFANG_CLOUD_BASE_URL`
-- `MOFANG_CLOUD_USERNAME`
-- `MOFANG_CLOUD_PASSWORD`
-- `MOFANG_CLOUD_LANG=zh-cn`
-- `MOFANG_CLOUD_INSECURE_SKIP_VERIFY=true`
-- `MOFANG_CLOUD_LIST_PATH=/v1/clouds`
-- `MOFANG_CLOUD_INSTANCE_DETAIL_PATH=/v1/clouds/:id`
-
-财务上游配置：
-
-- `FINANCE_UPSTREAM_BASE_URL`
-- `FINANCE_UPSTREAM_USERNAME`
-- `FINANCE_UPSTREAM_PASSWORD`
-- `FINANCE_UPSTREAM_SOURCE_NAME`
-- `FINANCE_UPSTREAM_INSECURE_SKIP_VERIFY`
-
-说明：
-
-- `.env.example` 可以提交，用来保存字段说明和默认模板。
-- `.env.local` 不能提交，用来保存当前机器的真实账号、密码和地址。
-- 如果只需要快速看界面或继续开发前端，优先使用 `STORAGE_DRIVER=memory`。
-- 如果需要联调持久化、报表、Provider 同步、资源明细，切换到 `STORAGE_DRIVER=mysql`。
-
-当 `STORAGE_DRIVER=mysql` 且 `MYSQL_DSN` 可用时：
-
-- 客户、商品、订单、账单、服务走 MySQL
-- 审计日志走 MySQL
-- 魔方云同步会把实例、资源明细和同步日志写入 MySQL
-
-## MySQL 初始化
-
-先创建数据库：
-
-```sql
-CREATE DATABASE idc_finance CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-执行迁移与种子：
+## 构建验证
 
 ```bash
-npm run db:migrate:mysql
-npm run db:seed:mysql
+go build ./...
+npm run build:admin
+npm run build:portal
 ```
-
-macOS / Linux：
-
-```bash
-npm run db:migrate:mysql:unix
-npm run db:seed:mysql:unix
-```
-
-一次完成初始化：
-
-```bash
-npm run db:prepare:mysql
-```
-
-macOS / Linux：
-
-```bash
-npm run db:prepare:mysql:unix
-```
-
-本机 MySQL 安装说明见：
-
-- `docs/mysql-setup.md`
-
-初始化完成后会得到一套完整的演示数据，用于后台、用户端、报表和 Provider 资源联调。
-
-## 当前可用范围
-
-### 后台
-
-- 登录
-- 动态菜单
-- 工作台
-- 客户列表与客户详情工作台
-- 联系人新增、编辑、删除
-- 实名审核
-- 审计日志
-- 商品列表与商品详情工作台
-- 价格矩阵、配置项、资源模板编辑
-- 订单列表与订单详情工作台
-- 账单列表与账单详情工作台
-- 线下收款登记
-- 支付记录与退款记录查看
-- 服务列表与服务详情工作台
-- 服务恢复、暂停、终止、重启、重装、重置密码
-- 服务详情直接打开 VNC 控制台
-- 魔方云健康检查
-- 魔方云实例列表、实例详情、远程动作
-- 魔方云实例拉取同步
-- 服务资源明细查看
-- Provider 同步日志查看
-
-### 用户中心
-
-- 控制台概览
-- 商品商城
-- 配置项选择与价格预览
-- 下单生成订单和账单
-- 账单支付
-- 服务列表
-- 订单列表
-- 工单概览
-- 钱包概览
-- 账户资料概览
-
-### API
-
-后台：
-
-- `GET /api/v1/health`
-- `POST /api/v1/admin/auth/login`
-- `GET /api/v1/admin/menus`
-- `GET /api/v1/admin/permissions`
-- `GET /api/v1/admin/audit-logs`
-- `GET /api/v1/admin/customer-groups`
-- `GET /api/v1/admin/customer-levels`
-- `GET /api/v1/admin/customer-identities`
-- `GET /api/v1/admin/customers`
-- `POST /api/v1/admin/customers`
-- `GET /api/v1/admin/customers/:id`
-- `PATCH /api/v1/admin/customers/:id`
-- `GET /api/v1/admin/customers/:id/contacts`
-- `POST /api/v1/admin/customers/:id/contacts`
-- `PUT /api/v1/admin/customers/:id/contacts/:contactId`
-- `DELETE /api/v1/admin/customers/:id/contacts/:contactId`
-- `GET /api/v1/admin/customers/:id/identities`
-- `POST /api/v1/admin/customers/:id/identities/:identityId/review`
-- `GET /api/v1/admin/customers/:id/services`
-- `GET /api/v1/admin/customers/:id/invoices`
-- `GET /api/v1/admin/customers/:id/tickets`
-- `GET /api/v1/admin/customers/:id/audit-logs`
-- `GET /api/v1/admin/products`
-- `GET /api/v1/admin/products/:id`
-- `POST /api/v1/admin/products`
-- `PATCH /api/v1/admin/products/:id`
-- `GET /api/v1/admin/orders`
-- `GET /api/v1/admin/orders/:id`
-- `PATCH /api/v1/admin/orders/:id`
-- `GET /api/v1/admin/invoices`
-- `GET /api/v1/admin/invoices/:id`
-- `PATCH /api/v1/admin/invoices/:id`
-- `POST /api/v1/admin/invoices/:id/receive-payment`
-- `POST /api/v1/admin/invoices/:id/refund`
-- `GET /api/v1/admin/services`
-- `GET /api/v1/admin/services/:id`
-- `POST /api/v1/admin/services/:id/actions/:action`
-- `GET /api/v1/admin/providers/mofang/health`
-- `GET /api/v1/admin/providers/mofang/instances`
-- `GET /api/v1/admin/providers/mofang/instances/:id`
-- `POST /api/v1/admin/providers/mofang/instances/:id/actions/:action`
-- `POST /api/v1/admin/providers/mofang/sync`
-- `POST /api/v1/admin/providers/mofang/services/:id/sync`
-- `GET /api/v1/admin/providers/mofang/services/:id/resources`
-- `GET /api/v1/admin/providers/mofang/sync-logs`
-
-门户：
-
-- `GET /api/v1/portal/dashboard`
-- `GET /api/v1/portal/products`
-- `GET /api/v1/portal/orders`
-- `GET /api/v1/portal/invoices`
-- `GET /api/v1/portal/services`
-- `GET /api/v1/portal/tickets`
-- `GET /api/v1/portal/account`
-- `POST /api/v1/portal/orders/checkout`
-- `POST /api/v1/portal/invoices/:id/pay`
-
-## 当前验证
-
-已通过：
-
-- `& "C:\Program Files\Go\bin\go.exe" build ./...`
-- `npm run build:admin`
-- `npm run build:portal`
-- `npm run db:migrate:mysql`
-
-已做过的主链验证：
-
-- 门户下单生成 `ORD-00000003 / INV-00000003`
-- 门户按配置项下单后金额按增价计算到 `629`
-- 门户支付账单后激活 `SRV-00000002`
-- 后台登记线下收款生成 `PAY-00000002`
-- 后台服务详情可执行重启、重置密码、重装
-- 魔方云真实环境实例 `585 / codexsync032001` 已成功同步到本地
-- 同步后本地生成 `SRV-MF-585`
-- 资源明细已落库：网卡 `1`、IP `1`、磁盘 `1`
-- Provider 同步日志已成功写入 MySQL

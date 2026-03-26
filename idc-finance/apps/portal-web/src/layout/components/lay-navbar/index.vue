@@ -9,12 +9,12 @@ const route = useRoute();
 const localeStore = useLocaleStore();
 const userStore = useUserStore();
 
-const title = computed(() => resolveMetaTitle(route.meta, localeStore.locale, "客户中心", "Client Area"));
+const title = computed(() => resolveMetaTitle(route.meta, localeStore.locale, "无穷云IDC业务管理系统", "Infinity Cloud IDC Management System"));
 const subtitle = computed(() =>
   pickLabel(
     localeStore.locale,
-    "江苏白猿网络科技有限公司 · 猿创软件业务组 · 官网 www.bysat.com",
-    "Jiangsu Baiyuan Network Technology Co., Ltd. · Yuanchuang Software Business Group · www.bysat.com"
+    "江苏白猿网络科技有限公司-猿创软件开发",
+    "Jiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Development"
   )
 );
 const logoutLabel = computed(() => pickLabel(localeStore.locale, "退出登录", "Sign out"));
