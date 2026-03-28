@@ -17,30 +17,34 @@ const brandSubtitle = computed(() => pickLabel(localeStore.locale, settingsStore
 const footerText = computed(() =>
   pickLabel(
     localeStore.locale,
-    "无穷云IDC业务管理系统\n江苏白猿网络科技有限公司-猿创软件开发\n100% AI 开发，著作权归江苏白猿网络科技有限公司所有",
-    "Infinity Cloud IDC Management System\nJiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Development\n100% AI-developed, copyright owned by Jiangsu Baiyuan Network Technology Co., Ltd."
+    "系统由江苏白猿网络科技有限公司 - 猿创软件开发 100% AI 开发，全部著作权归白猿科技所有。",
+    "100% AI-developed by Jiangsu Baiyuan Network Technology Co., Ltd. - Yuanchuang Software Development. All copyrights belong to Baiyuan Technology."
   )
 );
 
 function handleSelect(path: string) {
   if (path && path !== route.path) {
-    router.push(path);
+    void router.push(path);
   }
 }
 </script>
 
 <template>
-  <aside class="portal-sidebar">
-    <div class="portal-brand">
-      <div class="portal-brand__mark">∞</div>
-      <div>
-        <div class="portal-brand__title">{{ brandTitle }}</div>
-        <div class="portal-brand__subtitle">{{ brandSubtitle }}</div>
+  <aside class="shell-sidebar portal-sidebar">
+    <div class="menu-brand portal-brand">
+      <div class="menu-brand__logo">BY</div>
+      <div class="menu-brand__text">
+        <div class="menu-brand__title">{{ brandTitle }}</div>
+        <div class="menu-brand__subtitle">{{ brandSubtitle }}</div>
       </div>
     </div>
 
-    <div class="portal-sidebar__body">
+    <div class="sidebar-scroll portal-sidebar__body">
+      <div class="portal-sidebar__section">
+        {{ pickLabel(localeStore.locale, "门户导航", "Portal Navigation") }}
+      </div>
       <el-menu
+        class="sidebar-menu"
         :default-active="route.path"
         background-color="transparent"
         text-color="#dbeafe"
@@ -51,8 +55,9 @@ function handleSelect(path: string) {
       </el-menu>
     </div>
 
-    <div class="portal-sidebar__footer" style="white-space: pre-line">
-      {{ footerText }}
+    <div class="portal-sidebar__footer">
+      <div class="portal-sidebar__website">www.bysat.com</div>
+      <div>{{ footerText }}</div>
     </div>
   </aside>
 </template>

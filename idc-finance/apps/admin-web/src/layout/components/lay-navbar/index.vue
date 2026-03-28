@@ -13,10 +13,7 @@ const breadcrumbTitles = computed(() =>
   route.matched.map(item => resolveMetaTitle(item.meta, localeStore.locale)).filter(Boolean)
 );
 
-const currentTitle = computed(() => {
-  const titles = breadcrumbTitles.value;
-  return titles[titles.length - 1] || pickLabel(localeStore.locale, "工作台", "Workbench");
-});
+const currentTitle = computed(() => breadcrumbTitles.value.at(-1) || pickLabel(localeStore.locale, "工作台", "Workbench"));
 const currentSection = computed(() => breadcrumbTitles.value[0] || pickLabel(localeStore.locale, "后台", "Admin"));
 const displayName = computed(() => {
   if (!userStore.displayName || isLegacyMojibake(userStore.displayName)) {

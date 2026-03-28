@@ -6,6 +6,7 @@ type AppConfig struct {
 	AppName         string
 	HTTPAddr        string
 	GinMode         string
+	SiteURL         string
 	StorageDriver   string
 	StorageStrict   bool
 	MySQLDSN        string
@@ -38,6 +39,7 @@ func Load() AppConfig {
 		AppName:       getEnv("APP_NAME", "wuqiongyun-idc-api"),
 		HTTPAddr:      getEnv("HTTP_ADDR", ":18080"),
 		GinMode:       getEnv("GIN_MODE", "debug"),
+		SiteURL:       getEnv("SITE_URL", "http://127.0.0.1:18080"),
 		StorageDriver: getEnv("STORAGE_DRIVER", "memory"),
 		StorageStrict: getBoolEnv("STORAGE_STRICT", false),
 		MySQLDSN:      getEnv("MYSQL_DSN", ""),

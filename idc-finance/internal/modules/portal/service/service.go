@@ -2,10 +2,13 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
+	customerDomain "idc-finance/internal/modules/customer/domain"
 	customerDTO "idc-finance/internal/modules/customer/dto"
 	customerService "idc-finance/internal/modules/customer/service"
 	orderDomain "idc-finance/internal/modules/order/domain"
+	orderDTO "idc-finance/internal/modules/order/dto"
 	orderService "idc-finance/internal/modules/order/service"
 	portalDTO "idc-finance/internal/modules/portal/dto"
 )
@@ -78,6 +81,41 @@ func (service *Service) GetAccount(customerID int64) (portalDTO.AccountResponse,
 	return account, true
 }
 
+func (service *Service) UpdateProfile(customerID int64, request customerDTO.UpdateCustomerRequest, requestID string) (portalDTO.AccountResponse, bool) {
+	updated, ok := service.customer.UpdateSelf(customerID, request, requestID)
+	if !ok {
+		return portalDTO.AccountResponse{}, false
+	}
+	return portalDTO.AccountResponse{
+		Customer: updated,
+		Wallet:   service.walletSummaryForCustomer(customerID),
+	}, true
+}
+
+func (service *Service) CreateContact(customerID int64, request customerDTO.CreateContactRequest, requestID string) (customerDomain.Contact, bool) {
+	return service.customer.AddContactByCustomer(customerID, request, requestID)
+}
+
+func (service *Service) UpdateContact(customerID, contactID int64, request customerDTO.UpdateContactRequest, requestID string) (customerDomain.Contact, bool) {
+	return service.customer.UpdateContactByCustomer(customerID, contactID, request, requestID)
+}
+
+func (service *Service) DeleteContact(customerID, contactID int64, requestID string) bool {
+	return service.customer.DeleteContactByCustomer(customerID, contactID, requestID)
+}
+
+func (service *Service) GetIdentity(customerID int64) (*customerDomain.Identity, bool) {
+	account, ok := service.GetAccount(customerID)
+	if !ok {
+		return nil, false
+	}
+	return account.Customer.Identity, true
+}
+
+func (service *Service) SubmitIdentity(customerID int64, request customerDTO.SubmitIdentityRequest, requestID string) (customerDomain.Identity, bool) {
+	return service.customer.SubmitIdentityByCustomer(customerID, request, requestID)
+}
+
 func (service *Service) GetWallet(customerID int64) (portalDTO.WalletOverviewResponse, bool) {
 	if _, exists := service.customer.GetByID(customerID); !exists {
 		return portalDTO.WalletOverviewResponse{}, false
@@ -87,6 +125,79 @@ func (service *Service) GetWallet(customerID int64) (portalDTO.WalletOverviewRes
 		Wallet:       service.walletSummaryForCustomer(customerID),
 		Transactions: service.order.ListAccountTransactionsByCustomer(customerID, 50),
 	}, true
+}
+
+func (service *Service) ListWalletTransactions(customerID int64, transactionType, keyword, channel string, limit int) ([]orderDomain.AccountTransaction, bool) {
+	if _, exists := service.customer.GetByID(customerID); !exists {
+		return nil, false
+	}
+
+	items, _ := service.order.ListAccountTransactions(orderDomain.AccountTransactionFilter{
+		Page:            1,
+		Limit:           limit,
+		Sort:            "occurred_at",
+		Order:           "desc",
+		CustomerID:      customerID,
+		TransactionType: strings.TrimSpace(transactionType),
+		Keyword:         strings.TrimSpace(keyword),
+		Channel:         strings.TrimSpace(channel),
+	})
+	return items, true
+}
+
+func (service *Service) GetOrderDetail(customerID, orderID int64) (orderDTO.OrderDetailResponse, bool) {
+	detail, ok := service.order.GetOrderDetail(orderID)
+	if !ok || detail.Order.CustomerID != customerID {
+		return orderDTO.OrderDetailResponse{}, false
+	}
+	return detail, true
+}
+
+func (service *Service) CreateOrderRequest(customerID int64, customerName string, orderID int64, request orderDTO.CreateOrderRequestRequest, requestID string) (orderDTO.OrderDetailResponse, bool, error) {
+	return service.order.CreatePortalOrderRequest(customerID, customerName, orderID, request, requestID)
+}
+
+func (service *Service) GetInvoiceDetail(customerID, invoiceID int64) (orderDTO.InvoiceDetailResponse, bool) {
+	detail, ok := service.order.GetInvoiceDetail(invoiceID)
+	if !ok || detail.Invoice.CustomerID != customerID {
+		return orderDTO.InvoiceDetailResponse{}, false
+	}
+	return detail, true
+}
+
+func (service *Service) ListPayments(customerID int64, invoiceID int64, keyword, channel, status string) ([]orderDomain.PaymentRecord, bool) {
+	if _, exists := service.customer.GetByID(customerID); !exists {
+		return nil, false
+	}
+	items, _ := service.order.ListPayments(orderDomain.PaymentListFilter{
+		Page:       1,
+		Limit:      200,
+		Sort:       "paid_at",
+		Order:      "desc",
+		CustomerID: customerID,
+		InvoiceID:  invoiceID,
+		Keyword:    strings.TrimSpace(keyword),
+		Channel:    strings.TrimSpace(channel),
+		Status:     strings.TrimSpace(status),
+	})
+	return items, true
+}
+
+func (service *Service) ListRefunds(customerID int64, invoiceID int64, keyword, status string) ([]orderDomain.RefundRecord, bool) {
+	if _, exists := service.customer.GetByID(customerID); !exists {
+		return nil, false
+	}
+	items, _ := service.order.ListRefunds(orderDomain.RefundListFilter{
+		Page:       1,
+		Limit:      200,
+		Sort:       "created_at",
+		Order:      "desc",
+		CustomerID: customerID,
+		InvoiceID:  invoiceID,
+		Keyword:    strings.TrimSpace(keyword),
+		Status:     strings.TrimSpace(status),
+	})
+	return items, true
 }
 
 func mapTickets(items []customerDTO.RelatedItem) []portalDTO.Ticket {
@@ -144,5 +255,5 @@ func formatWalletValue(value float64) string {
 }
 
 func formatCurrency(value string) string {
-	return fmt.Sprintf("¥ %s", value)
+	return fmt.Sprintf("¥%s", value)
 }

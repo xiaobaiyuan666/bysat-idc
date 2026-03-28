@@ -29,8 +29,9 @@ func PortalGuard() gin.HandlerFunc {
 			return
 		}
 
-		c.Set("customerID", int64(1))
-		c.Set("customerName", "演示客户")
+		customerID, customerName := currentPortalIdentity()
+		c.Set("customerID", customerID)
+		c.Set("customerName", customerName)
 		c.Next()
 	}
 }

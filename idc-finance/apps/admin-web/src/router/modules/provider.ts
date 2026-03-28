@@ -60,6 +60,16 @@ export default {
       }
     },
     {
+      path: "plugins",
+      name: "provider-plugins",
+      component: () => import("@/views/provider/plugins/index.vue"),
+      meta: {
+        title: "\u63d2\u4ef6\u914d\u7f6e",
+        titleEn: "Plugin Settings",
+        requiresAuth: true
+      }
+    },
+    {
       path: "mofang",
       name: "provider-mofang",
       redirect: {

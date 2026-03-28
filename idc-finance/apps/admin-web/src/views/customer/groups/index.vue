@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import {
@@ -10,6 +11,7 @@ import {
   type CustomerGroupRecord
 } from "@/api/admin";
 
+const router = useRouter();
 const loading = ref(false);
 const submitting = ref(false);
 const dialogVisible = ref(false);
@@ -21,7 +23,20 @@ const form = reactive({
   description: ""
 });
 
+const sortedItems = computed(() =>
+  [...items.value].sort((left, right) => {
+    if (right.customerCount !== left.customerCount) {
+      return right.customerCount - left.customerCount;
+    }
+    return left.name.localeCompare(right.name, "zh-CN");
+  })
+);
+
 const usedCount = computed(() => items.value.filter(item => item.customerCount > 0).length);
+const totalCustomerCount = computed(() =>
+  items.value.reduce((total, item) => total + item.customerCount, 0)
+);
+const largestGroup = computed(() => sortedItems.value[0]);
 
 function resetForm() {
   editingId.value = null;
@@ -50,14 +65,32 @@ function openEdit(item: CustomerGroupRecord) {
   dialogVisible.value = true;
 }
 
+function openCustomers(item: CustomerGroupRecord) {
+  void router.push({
+    path: "/customer/list",
+    query: {
+      groupName: item.name
+    }
+  });
+}
+
 async function submitForm() {
+  if (!form.name.trim()) {
+    ElMessage.warning("请输入客户分组名称");
+    return;
+  }
+
   submitting.value = true;
   try {
+    const payload = {
+      name: form.name.trim(),
+      description: form.description.trim()
+    };
     if (editingId.value) {
-      await updateCustomerGroup(editingId.value, form);
+      await updateCustomerGroup(editingId.value, payload);
       ElMessage.success("客户分组已更新");
     } else {
-      await createCustomerGroup(form);
+      await createCustomerGroup(payload);
       ElMessage.success("客户分组已创建");
     }
     dialogVisible.value = false;
@@ -86,8 +119,8 @@ onMounted(() => {
   <div v-loading="loading">
     <PageWorkbench
       eyebrow="客户"
-      title="客户分组与折扣"
-      subtitle="维护客户分组、营销分层和专属策略入口，让这页真正可编辑、可运营。"
+      title="客户分组"
+      subtitle="维护客户分组、分层说明和客户归属入口，让分组页面不再只是静态配置表。"
     >
       <template #actions>
         <el-button @click="loadGroups">刷新</el-button>
@@ -97,21 +130,36 @@ onMounted(() => {
       <template #metrics>
         <div class="summary-strip">
           <div class="summary-pill"><span>分组总数</span><strong>{{ items.length }}</strong></div>
-          <div class="summary-pill"><span>已绑定客户</span><strong>{{ usedCount }}</strong></div>
-          <div class="summary-pill"><span>空闲分组</span><strong>{{ items.length - usedCount }}</strong></div>
+          <div class="summary-pill"><span>已绑定分组</span><strong>{{ usedCount }}</strong></div>
+          <div class="summary-pill"><span>覆盖客户数</span><strong>{{ totalCustomerCount }}</strong></div>
+          <div class="summary-pill">
+            <span>最大分组</span>
+            <strong>{{ largestGroup ? largestGroup.name : "暂无" }}</strong>
+          </div>
         </div>
       </template>
 
-      <el-table :data="items" border stripe empty-text="暂无客户分组">
-        <el-table-column prop="name" label="分组名称" min-width="180" />
-        <el-table-column prop="description" label="说明" min-width="320">
+      <el-table :data="sortedItems" border stripe empty-text="暂无客户分组">
+        <el-table-column prop="name" label="分组名称" min-width="200">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openCustomers(row)">{{ row.name }}</el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="customerCount" label="绑定客户" min-width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.customerCount > 0 ? 'success' : 'info'" effect="light">
+              {{ row.customerCount }} 位
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="分组说明" min-width="360">
           <template #default="{ row }">
             {{ row.description || "暂无说明" }}
           </template>
         </el-table-column>
-        <el-table-column prop="customerCount" label="客户数" min-width="100" />
-        <el-table-column label="操作" min-width="180" fixed="right">
+        <el-table-column label="操作" min-width="220" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" @click="openCustomers(row)">查看客户</el-button>
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button
               link
@@ -131,11 +179,17 @@ onMounted(() => {
         width="520px"
       >
         <el-form label-position="top">
-          <el-form-item label="分组名称">
-            <el-input v-model="form.name" maxlength="64" />
+          <el-form-item label="分组名称" required>
+            <el-input v-model="form.name" maxlength="64" show-word-limit />
           </el-form-item>
-          <el-form-item label="说明">
-            <el-input v-model="form.description" type="textarea" :rows="3" maxlength="255" />
+          <el-form-item label="分组说明">
+            <el-input
+              v-model="form.description"
+              type="textarea"
+              :rows="4"
+              maxlength="255"
+              show-word-limit
+            />
           </el-form-item>
         </el-form>
         <template #footer>

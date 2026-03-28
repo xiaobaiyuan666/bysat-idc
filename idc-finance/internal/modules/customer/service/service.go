@@ -237,6 +237,41 @@ func (service *Service) Update(id int64, request dto.UpdateCustomerRequest, admi
 	return updated, true
 }
 
+func (service *Service) UpdateSelf(customerID int64, request dto.UpdateCustomerRequest, requestID string) (domain.Customer, bool) {
+	current, exists := service.repository.GetByID(customerID)
+	if !exists {
+		return domain.Customer{}, false
+	}
+
+	updated, ok := service.repository.Update(customerID, domain.Customer{
+		Name:       request.Name,
+		Email:      request.Email,
+		Mobile:     request.Mobile,
+		Type:       current.Type,
+		Status:     current.Status,
+		GroupName:  current.GroupName,
+		LevelName:  current.LevelName,
+		SalesOwner: current.SalesOwner,
+		Remarks:    request.Remarks,
+	})
+	if !ok {
+		return domain.Customer{}, false
+	}
+
+	service.audit.Record(audit.Entry{
+		ActorType:   "CUSTOMER",
+		ActorID:     updated.ID,
+		Actor:       updated.Name,
+		Action:      "customer.self.update",
+		TargetType:  "customer",
+		TargetID:    updated.ID,
+		Target:      updated.CustomerNo,
+		RequestID:   requestID,
+		Description: "客户更新门户基础资料",
+	})
+	return updated, true
+}
+
 func (service *Service) ListIdentityOverview() []dto.IdentityOverviewItem {
 	customers := service.List()
 	identities := make([]dto.IdentityOverviewItem, 0, len(customers))
@@ -321,6 +356,36 @@ func (service *Service) ListCustomerAuditLogs(customerID int64) []audit.Entry {
 	return service.audit.ListByTarget("customer", customerID)
 }
 
+func (service *Service) AddContactByCustomer(customerID int64, request dto.CreateContactRequest, requestID string) (domain.Contact, bool) {
+	customer, contact, ok := service.repository.AddContact(customerID, domain.Contact{
+		Name:      request.Name,
+		Email:     request.Email,
+		Mobile:    request.Mobile,
+		RoleName:  request.RoleName,
+		IsPrimary: request.IsPrimary,
+	})
+	if !ok {
+		return domain.Contact{}, false
+	}
+
+	service.audit.Record(audit.Entry{
+		ActorType:   "CUSTOMER",
+		ActorID:     customer.ID,
+		Actor:       customer.Name,
+		Action:      "customer.contact.self_create",
+		TargetType:  "customer",
+		TargetID:    customer.ID,
+		Target:      customer.CustomerNo,
+		RequestID:   requestID,
+		Description: "客户在门户新增联系人",
+		Payload: map[string]any{
+			"contactName": contact.Name,
+			"roleName":    contact.RoleName,
+		},
+	})
+	return contact, true
+}
+
 func (service *Service) AddContact(customerID int64, request dto.CreateContactRequest, adminID int64, adminName, requestID string) (domain.Contact, bool) {
 	customer, contact, ok := service.repository.AddContact(customerID, domain.Contact{
 		Name:      request.Name,
@@ -346,6 +411,36 @@ func (service *Service) AddContact(customerID int64, request dto.CreateContactRe
 		Payload: map[string]any{
 			"contactName": contact.Name,
 			"roleName":    contact.RoleName,
+		},
+	})
+	return contact, true
+}
+
+func (service *Service) UpdateContactByCustomer(customerID, contactID int64, request dto.UpdateContactRequest, requestID string) (domain.Contact, bool) {
+	customer, contact, ok := service.repository.UpdateContact(customerID, contactID, domain.Contact{
+		Name:      request.Name,
+		Email:     request.Email,
+		Mobile:    request.Mobile,
+		RoleName:  request.RoleName,
+		IsPrimary: request.IsPrimary,
+	})
+	if !ok {
+		return domain.Contact{}, false
+	}
+
+	service.audit.Record(audit.Entry{
+		ActorType:   "CUSTOMER",
+		ActorID:     customer.ID,
+		Actor:       customer.Name,
+		Action:      "customer.contact.self_update",
+		TargetType:  "customer",
+		TargetID:    customer.ID,
+		Target:      customer.CustomerNo,
+		RequestID:   requestID,
+		Description: "客户在门户更新联系人",
+		Payload: map[string]any{
+			"contactId":   contact.ID,
+			"contactName": contact.Name,
 		},
 	})
 	return contact, true
@@ -381,6 +476,29 @@ func (service *Service) UpdateContact(customerID, contactID int64, request dto.U
 	return contact, true
 }
 
+func (service *Service) DeleteContactByCustomer(customerID, contactID int64, requestID string) bool {
+	customer, ok := service.repository.DeleteContact(customerID, contactID)
+	if !ok {
+		return false
+	}
+
+	service.audit.Record(audit.Entry{
+		ActorType:   "CUSTOMER",
+		ActorID:     customer.ID,
+		Actor:       customer.Name,
+		Action:      "customer.contact.self_delete",
+		TargetType:  "customer",
+		TargetID:    customer.ID,
+		Target:      customer.CustomerNo,
+		RequestID:   requestID,
+		Description: "客户在门户删除联系人",
+		Payload: map[string]any{
+			"contactId": contactID,
+		},
+	})
+	return true
+}
+
 func (service *Service) DeleteContact(customerID, contactID int64, adminID int64, adminName, requestID string) bool {
 	customer, ok := service.repository.DeleteContact(customerID, contactID)
 	if !ok {
@@ -402,6 +520,35 @@ func (service *Service) DeleteContact(customerID, contactID int64, adminID int64
 		},
 	})
 	return true
+}
+
+func (service *Service) SubmitIdentityByCustomer(customerID int64, request dto.SubmitIdentityRequest, requestID string) (domain.Identity, bool) {
+	updatedCustomer, ok := service.repository.SubmitIdentity(customerID, domain.Identity{
+		IdentityType: request.IdentityType,
+		SubjectName:  request.SubjectName,
+		CertNo:       request.CertNo,
+		CountryCode:  request.CountryCode,
+	})
+	if !ok || updatedCustomer.Identity == nil {
+		return domain.Identity{}, false
+	}
+
+	service.audit.Record(audit.Entry{
+		ActorType:   "CUSTOMER",
+		ActorID:     updatedCustomer.ID,
+		Actor:       updatedCustomer.Name,
+		Action:      "customer.identity.submit",
+		TargetType:  "customer",
+		TargetID:    updatedCustomer.ID,
+		Target:      updatedCustomer.CustomerNo,
+		RequestID:   requestID,
+		Description: "客户在门户提交实名认证资料",
+		Payload: map[string]any{
+			"identityType": updatedCustomer.Identity.IdentityType,
+			"subjectName":  updatedCustomer.Identity.SubjectName,
+		},
+	})
+	return *updatedCustomer.Identity, true
 }
 
 func (service *Service) ReviewIdentity(customerID int64, request dto.ReviewIdentityRequest, adminID int64, adminName, requestID string) (domain.Identity, bool) {

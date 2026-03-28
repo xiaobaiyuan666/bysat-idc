@@ -2,7 +2,7 @@ import type { RouteRecordRaw } from "vue-router";
 
 export default {
   path: "/services",
-  component: () => import("@/layout/components/lay-content/index.vue"),
+  component: () => import("@/layout/components/route-view/index.vue"),
   meta: { requiresAuth: true },
   children: [
     {

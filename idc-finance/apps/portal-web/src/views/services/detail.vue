@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { ElMessage } from "element-plus";
 import { useRoute, useRouter } from "vue-router";
-import {
-  loadServiceDetail,
-  type PortalServiceChangeOrder,
-  type PortalServiceDetailResponse
-} from "@/api/portal";
+import { loadServiceDetail, type PortalServiceChangeOrder, type PortalServiceDetailResponse } from "@/api/portal";
 import { pickLabel } from "@/locales";
 import { useLocaleStore } from "@/store";
 import {
@@ -21,118 +18,214 @@ const localeStore = useLocaleStore();
 const route = useRoute();
 const router = useRouter();
 
-const loading = ref(true);
+const loading = ref(false);
 const error = ref("");
 const detail = ref<PortalServiceDetailResponse | null>(null);
 
 const copy = computed(() => ({
-  title: pickLabel(localeStore.locale, "服务工作台", "Service Workbench"),
+  badge: pickLabel(localeStore.locale, "服务工作台", "Service Workbench"),
+  title: pickLabel(localeStore.locale, "服务详情", "Service Detail"),
   subtitle: pickLabel(
     localeStore.locale,
-    "围绕当前服务统一查看账单、工单、资源快照和改配记录，减少在多个页面之间来回切换。",
-    "Review billing, tickets, resource snapshots, and change records for this service in one place."
+    "在一个页面里统一查看当前服务的资源快照、配置、账务、工单与改配记录，避免在多个页面之间来回切换。",
+    "Review resource snapshot, configuration, billing, tickets, and change records in one page."
   ),
-  back: pickLabel(localeStore.locale, "返回服务列表", "Back to Services"),
-  orders: pickLabel(localeStore.locale, "查看订单", "Open Orders"),
-  invoices: pickLabel(localeStore.locale, "查看账单", "Open Invoices"),
-  ticketCreate: pickLabel(localeStore.locale, "提交工单", "Create Ticket"),
-  ticketList: pickLabel(localeStore.locale, "查看工单", "View Tickets"),
-  payInvoice: pickLabel(localeStore.locale, "去账单处理", "Open Invoice"),
-  serviceNo: pickLabel(localeStore.locale, "服务编号", "Service No."),
-  product: pickLabel(localeStore.locale, "商品", "Product"),
-  status: pickLabel(localeStore.locale, "状态", "Status"),
-  nextDueAt: pickLabel(localeStore.locale, "下次到期", "Next Due"),
-  providerType: pickLabel(localeStore.locale, "渠道类型", "Provider"),
-  providerResourceId: pickLabel(localeStore.locale, "远端资源", "Remote ID"),
-  syncStatus: pickLabel(localeStore.locale, "同步状态", "Sync Status"),
-  syncMessage: pickLabel(localeStore.locale, "同步说明", "Sync Message"),
-  orderNo: pickLabel(localeStore.locale, "关联订单", "Order"),
-  invoiceNo: pickLabel(localeStore.locale, "关联账单", "Invoice"),
-  billingCycle: pickLabel(localeStore.locale, "计费周期", "Billing Cycle"),
-  createdAt: pickLabel(localeStore.locale, "开通时间", "Created At"),
-  updatedAt: pickLabel(localeStore.locale, "更新时间", "Updated At"),
-  region: pickLabel(localeStore.locale, "地域", "Region"),
-  ipAddress: pickLabel(localeStore.locale, "公网 IP", "Public IP"),
+  back: pickLabel(localeStore.locale, "返回服务中心", "Back to Services"),
+  openOrders: pickLabel(localeStore.locale, "订单中心", "Orders"),
+  openInvoices: pickLabel(localeStore.locale, "财务中心", "Finance"),
+  openTickets: pickLabel(localeStore.locale, "工单中心", "Tickets"),
+  newTicket: pickLabel(localeStore.locale, "提交工单", "Create Ticket"),
   overview: pickLabel(localeStore.locale, "服务概览", "Overview"),
-  business: pickLabel(localeStore.locale, "业务联动", "Business Links"),
-  resource: pickLabel(localeStore.locale, "资源快照", "Resource Snapshot"),
-  config: pickLabel(localeStore.locale, "配置项快照", "Configuration"),
+  resources: pickLabel(localeStore.locale, "资源快照", "Resource Snapshot"),
+  access: pickLabel(localeStore.locale, "访问与登录", "Access"),
+  accessDesc: pickLabel(localeStore.locale, "集中查看登录账号、密码提示和访问地址。", "Review login account, password hint, and access endpoints."),
+  network: pickLabel(localeStore.locale, "网络与安全", "Network & Security"),
+  networkDesc: pickLabel(localeStore.locale, "快速查看公网地址、地域和安全组信息。", "Quickly review public addresses, region, and security group."),
+  timeline: pickLabel(localeStore.locale, "实例时间线", "Instance Timeline"),
+  timelineDesc: pickLabel(localeStore.locale, "按时间查看创建、同步、到期和改配变化。", "Review creation, sync, due, and change events in time order."),
+  billingDesk: pickLabel(localeStore.locale, "账务工作台", "Billing Desk"),
+  billingDeskDesc: pickLabel(localeStore.locale, "围绕订单、账单和到期节点继续处理当前服务。", "Continue handling order, invoice, and due actions around this service."),
+  changeDesk: pickLabel(localeStore.locale, "改配工作台", "Change Desk"),
+  changeDeskDesc: pickLabel(localeStore.locale, "查看改配总量、待支付和执行异常，并继续跟进。", "Track total changes, waiting payments, and failures from one panel."),
+  config: pickLabel(localeStore.locale, "配置项", "Configuration"),
+  billing: pickLabel(localeStore.locale, "账务关联", "Billing"),
   changes: pickLabel(localeStore.locale, "改配记录", "Change Orders"),
-  changePending: pickLabel(localeStore.locale, "待处理改配", "Pending Changes"),
-  changeCount: pickLabel(localeStore.locale, "改配总数", "Change Count"),
-  businessHint: pickLabel(
-    localeStore.locale,
-    "围绕当前服务快速跳转到订单、账单和工单中心。",
-    "Quick jumps to orders, invoices, and tickets for this service."
-  ),
-  invoiceHint: pickLabel(
-    localeStore.locale,
-    "如果账单未支付，优先前往账单中心处理收款，再继续变更或工单流程。",
-    "If the invoice is unpaid, handle billing first before continuing changes or support."
-  ),
-  orderCenter: pickLabel(localeStore.locale, "订单中心", "Order Center"),
-  invoiceCenter: pickLabel(localeStore.locale, "账单中心", "Invoice Center"),
-  ticketCenter: pickLabel(localeStore.locale, "工单中心", "Ticket Center"),
-  resourceCenter: pickLabel(localeStore.locale, "资源概况", "Resource Overview"),
+  noConfig: pickLabel(localeStore.locale, "暂无配置快照", "No configuration snapshot"),
+  noChanges: pickLabel(localeStore.locale, "暂无改配记录", "No change orders"),
+  serviceNo: pickLabel(localeStore.locale, "服务号", "Service No."),
+  productName: pickLabel(localeStore.locale, "商品", "Product"),
+  status: pickLabel(localeStore.locale, "状态", "Status"),
+  provider: pickLabel(localeStore.locale, "渠道", "Provider"),
+  nextDueAt: pickLabel(localeStore.locale, "到期时间", "Next Due"),
+  orderNo: pickLabel(localeStore.locale, "订单号", "Order No."),
+  invoiceNo: pickLabel(localeStore.locale, "账单号", "Invoice No."),
+  invoiceStatus: pickLabel(localeStore.locale, "账单状态", "Invoice Status"),
   hostname: pickLabel(localeStore.locale, "主机名", "Hostname"),
-  os: pickLabel(localeStore.locale, "系统", "OS"),
+  region: pickLabel(localeStore.locale, "地域", "Region"),
+  publicIpv4: pickLabel(localeStore.locale, "公网 IPv4", "Public IPv4"),
+  publicIpv6: pickLabel(localeStore.locale, "公网 IPv6", "Public IPv6"),
+  zone: pickLabel(localeStore.locale, "可用区", "Zone"),
   cpu: pickLabel(localeStore.locale, "CPU", "CPU"),
   memory: pickLabel(localeStore.locale, "内存", "Memory"),
-  systemDisk: pickLabel(localeStore.locale, "系统盘", "System Disk"),
-  dataDisk: pickLabel(localeStore.locale, "数据盘", "Data Disk"),
+  disk: pickLabel(localeStore.locale, "磁盘", "Disk"),
   bandwidth: pickLabel(localeStore.locale, "带宽", "Bandwidth"),
-  loginUser: pickLabel(localeStore.locale, "登录用户", "Login User"),
+  loginUser: pickLabel(localeStore.locale, "登录账号", "Login User"),
+  passwordHint: pickLabel(localeStore.locale, "密码提示", "Password Hint"),
   securityGroup: pickLabel(localeStore.locale, "安全组", "Security Group"),
-  ipv6: pickLabel(localeStore.locale, "IPv6", "IPv6"),
-  configName: pickLabel(localeStore.locale, "配置项", "Option"),
-  configValue: pickLabel(localeStore.locale, "当前值", "Value"),
-  priceDelta: pickLabel(localeStore.locale, "差价", "Delta"),
-  changeAction: pickLabel(localeStore.locale, "改配动作", "Action"),
-  changeTitle: pickLabel(localeStore.locale, "标题", "Title"),
-  amount: pickLabel(localeStore.locale, "金额", "Amount"),
-  invoiceStatus: pickLabel(localeStore.locale, "账单状态", "Invoice Status"),
-  executionStatus: pickLabel(localeStore.locale, "执行状态", "Execution"),
-  changeCreatedAt: pickLabel(localeStore.locale, "创建时间", "Created At"),
   action: pickLabel(localeStore.locale, "操作", "Action"),
+  amount: pickLabel(localeStore.locale, "金额", "Amount"),
+  execution: pickLabel(localeStore.locale, "执行状态", "Execution"),
+  cycle: pickLabel(localeStore.locale, "周期", "Billing Cycle"),
+  createdAt: pickLabel(localeStore.locale, "创建时间", "Created At"),
+  collaboration: pickLabel(localeStore.locale, "业务协同", "Business Collaboration"),
+  collaborationDesc: pickLabel(localeStore.locale, "围绕该服务继续处理订单、账单、工单与改配。", "Continue handling orders, invoices, tickets, and change actions around this service."),
+  waitingPayment: pickLabel(localeStore.locale, "待支付改配", "Waiting Payment"),
+  executingNow: pickLabel(localeStore.locale, "执行中", "Executing"),
+  failedChanges: pickLabel(localeStore.locale, "执行失败", "Failed Changes"),
+  configName: pickLabel(localeStore.locale, "配置项", "Configuration"),
+  configValue: pickLabel(localeStore.locale, "当前值", "Current Value"),
+  configPrice: pickLabel(localeStore.locale, "差价", "Delta"),
+  changeTitle: pickLabel(localeStore.locale, "标题", "Title"),
+  changeAction: pickLabel(localeStore.locale, "动作", "Action"),
   openInvoice: pickLabel(localeStore.locale, "查看账单", "Open Invoice"),
-  openTickets: pickLabel(localeStore.locale, "查看关联工单", "Open Tickets"),
-  emptyConfig: pickLabel(localeStore.locale, "当前服务没有配置项快照。", "No configuration snapshot."),
-  emptyChanges: pickLabel(localeStore.locale, "当前服务还没有改配记录。", "No change orders."),
   loadError: pickLabel(localeStore.locale, "服务详情加载失败", "Failed to load service detail")
 }));
 
-const pendingChangeCount = computed(
-  () =>
-    detail.value?.changeOrders.filter(
-      item => item.status === "UNPAID" || item.executionStatus === "WAITING_PAYMENT"
-    ).length ?? 0
-);
+const configurationRows = computed(() => detail.value?.service.configuration ?? []);
+const changeOrders = computed(() => detail.value?.changeOrders ?? []);
+const resource = computed(() => detail.value?.service.resourceSnapshot);
+const heroMetrics = computed(() => [
+  {
+    label: pickLabel(localeStore.locale, "公网 IPv4", "Public IPv4"),
+    value: resource.value?.publicIpv4 || "-"
+  },
+  {
+    label: pickLabel(localeStore.locale, "配置项数", "Config Items"),
+    value: String(configurationRows.value.length)
+  },
+  {
+    label: pickLabel(localeStore.locale, "改配记录", "Change Orders"),
+    value: String(changeOrders.value.length)
+  },
+  {
+    label: pickLabel(localeStore.locale, "账单金额", "Invoice Amount"),
+    value: formatPortalMoney(localeStore.locale, detail.value?.invoice?.totalAmount || 0)
+  }
+]);
+const accessRows = computed(() => [
+  {
+    label: copy.value.loginUser,
+    value: resource.value?.loginUsername || "-",
+    copyable: Boolean(resource.value?.loginUsername)
+  },
+  {
+    label: copy.value.passwordHint,
+    value: resource.value?.passwordHint || "-",
+    copyable: Boolean(resource.value?.passwordHint)
+  },
+  {
+    label: copy.value.hostname,
+    value: resource.value?.hostname || "-",
+    copyable: Boolean(resource.value?.hostname)
+  }
+]);
+const changeStats = computed(() => ({
+  total: changeOrders.value.length,
+  waitingPayment: changeOrders.value.filter(item => item.executionStatus === "WAITING_PAYMENT").length,
+  executing: changeOrders.value.filter(item => item.executionStatus === "EXECUTING").length,
+  failed: changeOrders.value.filter(item => item.executionStatus === "EXECUTE_FAILED").length
+}));
+const networkRows = computed(() => [
+  {
+    label: copy.value.region,
+    value: resource.value?.regionName || "-",
+    copyable: false
+  },
+  {
+    label: copy.value.zone,
+    value: resource.value?.zoneName || "-",
+    copyable: false
+  },
+  {
+    label: copy.value.publicIpv4,
+    value: resource.value?.publicIpv4 || "-",
+    copyable: Boolean(resource.value?.publicIpv4)
+  },
+  {
+    label: copy.value.publicIpv6,
+    value: resource.value?.publicIpv6 || "-",
+    copyable: Boolean(resource.value?.publicIpv6)
+  },
+  {
+    label: copy.value.securityGroup,
+    value: resource.value?.securityGroup || "-",
+    copyable: Boolean(resource.value?.securityGroup)
+  }
+]);
+const serviceTimeline = computed(() => {
+  const items: Array<{ time: string; title: string; subtitle: string }> = [];
+  if (detail.value?.service.createdAt) {
+    items.push({
+      time: detail.value.service.createdAt,
+      title: pickLabel(localeStore.locale, "服务创建", "Service Created"),
+      subtitle: detail.value.service.serviceNo
+    });
+  }
+  if (detail.value?.service.lastSyncAt) {
+    items.push({
+      time: detail.value.service.lastSyncAt,
+      title: pickLabel(localeStore.locale, "最近同步", "Last Sync"),
+      subtitle: detail.value.service.syncStatus || "-"
+    });
+  }
+  if (detail.value?.service.nextDueAt) {
+    items.push({
+      time: detail.value.service.nextDueAt,
+      title: pickLabel(localeStore.locale, "下次到期", "Next Due"),
+      subtitle: detail.value.invoice?.invoiceNo || detail.value.order?.orderNo || "-"
+    });
+  }
+  for (const item of changeOrders.value.slice(0, 4)) {
+    items.push({
+      time: item.createdAt,
+      title: pickLabel(localeStore.locale, "改配记录", "Change Order"),
+      subtitle: `${item.actionName} / ${item.title}`
+    });
+  }
+  return items
+    .filter(item => item.time)
+    .sort((a, b) => String(b.time).localeCompare(String(a.time)));
+});
+const resourceHighlights = computed(() => [
+  {
+    label: copy.value.cpu,
+    value: `${resource.value?.cpuCores || 0} Core`
+  },
+  {
+    label: copy.value.memory,
+    value: `${resource.value?.memoryGB || 0} GB`
+  },
+  {
+    label: copy.value.disk,
+    value: `${(resource.value?.systemDiskGB || 0) + (resource.value?.dataDiskGB || 0)} GB`
+  },
+  {
+    label: copy.value.bandwidth,
+    value: `${resource.value?.bandwidthMbps || 0} Mbps`
+  }
+]);
 
-const linkedInvoiceUnpaid = computed(() => detail.value?.invoice?.status === "UNPAID");
-
-function providerTypeLabel(type?: string) {
-  const mapping: Record<string, string> = {
-    MOFANG_CLOUD: pickLabel(localeStore.locale, "魔方云", "Mofang Cloud"),
-    ZJMF_API: pickLabel(localeStore.locale, "上游财务", "Upstream Finance"),
-    WHMCS: "WHMCS",
-    RESOURCE: pickLabel(localeStore.locale, "资源池", "Resource Pool"),
-    MANUAL: pickLabel(localeStore.locale, "人工交付", "Manual Delivery"),
-    LOCAL: pickLabel(localeStore.locale, "本地模块", "Local")
+function executionType(status: string) {
+  const mapping: Record<string, "success" | "warning" | "danger" | "info"> = {
+    WAITING_PAYMENT: "warning",
+    PAID: "info",
+    EXECUTING: "info",
+    EXECUTED: "success",
+    EXECUTE_FAILED: "danger",
+    EXECUTE_BLOCKED: "warning",
+    REFUNDED: "info"
   };
-  return mapping[type || ""] ?? (type || "-");
-}
-
-function changeActionLabel(action: string) {
-  const mapping: Record<string, [string, string]> = {
-    "add-ipv4": ["新增 IPv4", "Add IPv4"],
-    "add-ipv6": ["新增 IPv6", "Add IPv6"],
-    "add-disk": ["新增数据盘", "Add Disk"],
-    "resize-disk": ["扩容磁盘", "Resize Disk"],
-    "create-snapshot": ["创建快照", "Create Snapshot"],
-    "create-backup": ["创建备份", "Create Backup"]
-  };
-  const pair = mapping[action];
-  return pair ? pickLabel(localeStore.locale, pair[0], pair[1]) : action || "-";
+  return mapping[status] ?? "info";
 }
 
 function executionLabel(status: string) {
@@ -149,23 +242,6 @@ function executionLabel(status: string) {
   return pair ? pickLabel(localeStore.locale, pair[0], pair[1]) : status || "-";
 }
 
-function executionTagType(status: string) {
-  const mapping: Record<string, "success" | "warning" | "danger" | "info" | "primary"> = {
-    WAITING_PAYMENT: "warning",
-    PAID: "info",
-    EXECUTING: "primary",
-    EXECUTED: "success",
-    EXECUTE_FAILED: "danger",
-    EXECUTE_BLOCKED: "warning",
-    REFUNDED: "info"
-  };
-  return mapping[status] ?? "info";
-}
-
-function invoiceStatusTag(status: string) {
-  return portalTagTypeByStatus(status);
-}
-
 async function fetchDetail() {
   loading.value = true;
   error.value = "";
@@ -179,46 +255,39 @@ async function fetchDetail() {
   }
 }
 
-function openOrderWorkbench() {
+function openInvoice(invoiceNo?: string) {
+  if (invoiceNo) {
+    void router.push({ path: "/invoices", query: { invoiceNo, serviceId: String(detail.value?.service.id ?? "") } });
+    return;
+  }
+  void router.push({ path: "/invoices", query: { serviceId: String(detail.value?.service.id ?? "") } });
+}
+
+function openTicketCenter(action = "") {
+  const serviceId = detail.value?.service.id;
+  void router.push({
+    path: "/tickets",
+    query: {
+      serviceId: serviceId ? String(serviceId) : undefined,
+      action: action || undefined,
+      title: action === "create" ? detail.value?.service.productName : undefined
+    }
+  });
+}
+
+function openOrderCenter() {
   const orderNo = detail.value?.order?.orderNo;
-  void router.push(orderNo ? { path: "/orders", query: { orderNo } } : "/orders");
+  void router.push({ path: "/orders", query: { orderNo: orderNo || undefined } });
 }
 
-function openInvoiceWorkbench(invoiceNo?: string) {
-  const targetInvoiceNo = invoiceNo || detail.value?.invoice?.invoiceNo;
-  const serviceId = detail.value?.service?.id;
-  void router.push(
-    targetInvoiceNo
-      ? { path: "/invoices", query: { invoiceNo: targetInvoiceNo, serviceId: serviceId ? String(serviceId) : undefined } }
-      : serviceId
-        ? { path: "/invoices", query: { serviceId: String(serviceId) } }
-        : "/invoices"
-  );
+function openChangeInvoice(item: PortalServiceChangeOrder) {
+  openInvoice(item.invoiceNo);
 }
 
-function openTicketCreate() {
-  const serviceId = detail.value?.service?.id;
-  void router.push(
-    serviceId
-      ? {
-          path: "/tickets",
-          query: {
-            action: "create",
-            serviceId: String(serviceId),
-            title: detail.value?.service?.productName || undefined
-          }
-        }
-      : "/tickets"
-  );
-}
-
-function openTicketList() {
-  const serviceId = detail.value?.service?.id;
-  void router.push(serviceId ? { path: "/tickets", query: { serviceId: String(serviceId) } } : "/tickets");
-}
-
-function openChangeInvoice(change: PortalServiceChangeOrder) {
-  openInvoiceWorkbench(change.invoiceNo);
+async function copyValue(value: string) {
+  if (!value || value === "-") return;
+  await navigator.clipboard.writeText(value);
+  ElMessage.success(pickLabel(localeStore.locale, "已复制到剪贴板", "Copied to clipboard"));
 }
 
 onMounted(() => {
@@ -241,143 +310,57 @@ watch(
       <section class="portal-card">
         <div class="portal-card-head">
           <div>
-            <div class="portal-badge">{{ detail.service.serviceNo }}</div>
+            <div class="portal-badge">{{ copy.badge }}</div>
             <h1 class="portal-title" style="margin-top: 12px">{{ copy.title }}</h1>
             <p class="portal-subtitle">{{ copy.subtitle }}</p>
           </div>
-          <div class="portal-toolbar" style="margin: 0">
+          <div class="portal-toolbar">
             <el-button @click="router.push('/services')">{{ copy.back }}</el-button>
-            <el-button plain @click="openOrderWorkbench">{{ copy.orders }}</el-button>
-            <el-button plain @click="openInvoiceWorkbench()">{{ copy.invoices }}</el-button>
-            <el-button type="primary" plain @click="openTicketCreate">{{ copy.ticketCreate }}</el-button>
+            <el-button plain @click="openOrderCenter">{{ copy.openOrders }}</el-button>
+            <el-button plain @click="openInvoice()">{{ copy.openInvoices }}</el-button>
+            <el-button plain @click="openTicketCenter()">{{ copy.openTickets }}</el-button>
+            <el-button type="primary" plain @click="openTicketCenter('create')">{{ copy.newTicket }}</el-button>
           </div>
         </div>
 
         <div class="portal-grid portal-grid--four" style="margin-top: 20px">
-          <div class="portal-stat">
+          <article class="portal-stat">
             <h3>{{ copy.serviceNo }}</h3>
             <strong>{{ detail.service.serviceNo }}</strong>
-          </div>
-          <div class="portal-stat">
+          </article>
+          <article class="portal-stat">
+            <h3>{{ copy.productName }}</h3>
+            <strong>{{ detail.service.productName }}</strong>
+          </article>
+          <article class="portal-stat">
             <h3>{{ copy.status }}</h3>
             <strong>{{ formatPortalServiceStatus(localeStore.locale, detail.service.status) }}</strong>
-          </div>
-          <div class="portal-stat">
+          </article>
+          <article class="portal-stat">
             <h3>{{ copy.nextDueAt }}</h3>
             <strong>{{ detail.service.nextDueAt || "-" }}</strong>
-          </div>
-          <div class="portal-stat">
-            <h3>{{ copy.changePending }}</h3>
-            <strong>{{ pendingChangeCount }}/{{ detail.changeOrders.length }}</strong>
+          </article>
+        </div>
+
+        <div class="portal-hero-grid" style="margin-top: 18px">
+          <div v-for="item in heroMetrics" :key="item.label" class="portal-mini-card">
+            <span class="portal-mini-card__label">{{ item.label }}</span>
+            <strong class="portal-mini-card__value">{{ item.value }}</strong>
           </div>
         </div>
       </section>
 
-      <section class="portal-card">
-        <div class="portal-card-head">
-          <div>
-            <h2 class="portal-panel__title">{{ copy.business }}</h2>
-            <div class="portal-panel__meta">{{ copy.businessHint }}</div>
-          </div>
-        </div>
-        <div class="service-link-grid">
-          <div class="service-link-card">
-            <div class="service-link-card__label">{{ copy.orderCenter }}</div>
-            <strong>{{ detail.order?.orderNo || "-" }}</strong>
-            <div class="service-link-card__meta">{{ detail.order?.productName || detail.service.productName }}</div>
-            <div class="service-link-card__actions">
-              <el-button plain @click="openOrderWorkbench">{{ copy.orders }}</el-button>
+      <section class="portal-grid portal-grid--three">
+        <article class="portal-card">
+          <div class="portal-card-head">
+            <div>
+              <h2 class="portal-panel__title">{{ copy.overview }}</h2>
             </div>
           </div>
-          <div class="service-link-card">
-            <div class="service-link-card__label">{{ copy.invoiceCenter }}</div>
-            <strong>{{ detail.invoice?.invoiceNo || "-" }}</strong>
-            <div class="service-link-card__meta">
-              <el-tag
-                v-if="detail.invoice?.status"
-                :type="portalTagTypeByStatus(detail.invoice.status)"
-                effect="light"
-              >
-                {{ formatPortalInvoiceStatus(localeStore.locale, detail.invoice.status) }}
-              </el-tag>
-            </div>
-            <div class="service-link-card__actions">
-              <el-button :type="linkedInvoiceUnpaid ? 'warning' : 'primary'" plain @click="openInvoiceWorkbench()">
-                {{ linkedInvoiceUnpaid ? copy.payInvoice : copy.invoices }}
-              </el-button>
-            </div>
-          </div>
-          <div class="service-link-card">
-            <div class="service-link-card__label">{{ copy.ticketCenter }}</div>
-            <strong>{{ copy.changeCount }}</strong>
-            <div class="service-link-card__meta">{{ pendingChangeCount }} / {{ detail.changeOrders.length }}</div>
-            <div class="service-link-card__actions">
-              <el-button plain @click="openTicketList">{{ copy.openTickets }}</el-button>
-              <el-button type="primary" plain @click="openTicketCreate">{{ copy.ticketCreate }}</el-button>
-            </div>
-          </div>
-          <div class="service-link-card">
-            <div class="service-link-card__label">{{ copy.resourceCenter }}</div>
-            <strong>{{ providerTypeLabel(detail.service.providerType) }}</strong>
-            <div class="service-link-card__meta">{{ detail.service.providerResourceId || "-" }}</div>
-            <div class="service-link-card__actions">
-              <el-button plain @click="openInvoiceWorkbench()">{{ copy.invoices }}</el-button>
-              <el-button plain @click="openTicketList">{{ copy.ticketList }}</el-button>
-            </div>
-          </div>
-        </div>
-        <el-alert
-          style="margin-top: 16px"
-          :title="copy.invoiceHint"
-          :type="linkedInvoiceUnpaid ? 'warning' : 'info'"
-          :closable="false"
-          show-icon
-        />
-      </section>
-
-      <section class="portal-card">
-        <div class="portal-grid portal-grid--two">
-          <div class="portal-summary">
-            <div class="portal-card-head" style="padding: 0 0 16px">
-              <div>
-                <h2 class="portal-panel__title">{{ copy.overview }}</h2>
-              </div>
-            </div>
+          <div class="portal-summary" style="margin-top: 18px">
             <div class="portal-summary-row">
-              <span>{{ copy.product }}</span>
-              <strong>{{ detail.service.productName }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.status }}</span>
-              <strong>
-                <el-tag :type="portalTagTypeByStatus(detail.service.status)" effect="light">
-                  {{ formatPortalServiceStatus(localeStore.locale, detail.service.status) }}
-                </el-tag>
-              </strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.providerType }}</span>
-              <strong>{{ providerTypeLabel(detail.service.providerType) }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.providerResourceId }}</span>
-              <strong>{{ detail.service.providerResourceId || "-" }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.region }}</span>
-              <strong>{{ detail.service.regionName || detail.service.resourceSnapshot.regionName || "-" }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.ipAddress }}</span>
-              <strong>{{ detail.service.ipAddress || detail.service.resourceSnapshot.publicIpv4 || "-" }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.syncStatus }}</span>
-              <strong>{{ detail.service.syncStatus || "-" }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.syncMessage }}</span>
-              <strong>{{ detail.service.syncMessage || "-" }}</strong>
+              <span>{{ copy.provider }}</span>
+              <strong>{{ detail.service.providerType || "-" }}</strong>
             </div>
             <div class="portal-summary-row">
               <span>{{ copy.orderNo }}</span>
@@ -388,210 +371,264 @@ watch(
               <strong>{{ detail.invoice?.invoiceNo || "-" }}</strong>
             </div>
             <div class="portal-summary-row">
-              <span>{{ copy.billingCycle }}</span>
-              <strong>
-                {{ formatPortalBillingCycle(localeStore.locale, detail.invoice?.billingCycle || detail.order?.billingCycle) }}
-              </strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.createdAt }}</span>
-              <strong>{{ detail.service.createdAt || "-" }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.updatedAt }}</span>
-              <strong>{{ detail.service.updatedAt || "-" }}</strong>
+              <span>{{ copy.invoiceStatus }}</span>
+              <strong>{{ formatPortalInvoiceStatus(localeStore.locale, detail.invoice?.status || "") }}</strong>
             </div>
           </div>
+        </article>
 
-          <div class="portal-summary">
-            <div class="portal-card-head" style="padding: 0 0 16px">
-              <div>
-                <h2 class="portal-panel__title">{{ copy.resource }}</h2>
-              </div>
+        <article class="portal-card">
+          <div class="portal-card-head">
+            <div>
+              <h2 class="portal-panel__title">{{ copy.collaboration }}</h2>
+              <div class="portal-panel__meta">{{ copy.collaborationDesc }}</div>
             </div>
+          </div>
+          <div class="portal-actions-grid" style="margin-top: 18px; grid-template-columns: 1fr">
+            <button type="button" class="portal-action-card" @click="openOrderCenter">
+              <strong>{{ copy.openOrders }}</strong>
+              <span>{{ detail.order?.orderNo || "-" }}</span>
+            </button>
+            <button type="button" class="portal-action-card" @click="openInvoice()">
+              <strong>{{ copy.openInvoices }}</strong>
+              <span>{{ detail.invoice?.invoiceNo || "-" }}</span>
+            </button>
+            <button type="button" class="portal-action-card" @click="openTicketCenter()">
+              <strong>{{ copy.openTickets }}</strong>
+              <span>{{ pickLabel(localeStore.locale, "查看围绕该服务的支持记录。", "Review tickets linked to this service.") }}</span>
+            </button>
+            <button type="button" class="portal-action-card" @click="openTicketCenter('create')">
+              <strong>{{ copy.newTicket }}</strong>
+              <span>{{ pickLabel(localeStore.locale, "直接带上服务上下文创建工单。", "Create a ticket with service context attached.") }}</span>
+            </button>
+          </div>
+        </article>
+
+        <article class="portal-card">
+          <div class="portal-card-head">
+            <div>
+              <h2 class="portal-panel__title">{{ copy.resources }}</h2>
+            </div>
+          </div>
+          <div class="portal-hero-grid" style="margin-top: 18px">
+            <div v-for="item in resourceHighlights" :key="item.label" class="portal-mini-card">
+              <span class="portal-mini-card__label">{{ item.label }}</span>
+              <strong class="portal-mini-card__value">{{ item.value }}</strong>
+            </div>
+          </div>
+          <div class="portal-summary" style="margin-top: 18px">
             <div class="portal-summary-row">
               <span>{{ copy.hostname }}</span>
-              <strong>{{ detail.service.resourceSnapshot.hostname || "-" }}</strong>
+              <strong>{{ resource?.hostname || "-" }}</strong>
             </div>
             <div class="portal-summary-row">
-              <span>{{ copy.os }}</span>
-              <strong>{{ detail.service.resourceSnapshot.operatingSystem || "-" }}</strong>
+              <span>{{ copy.region }}</span>
+              <strong>{{ resource?.regionName || "-" }}</strong>
             </div>
             <div class="portal-summary-row">
-              <span>{{ copy.cpu }}</span>
-              <strong>{{ detail.service.resourceSnapshot.cpuCores || 0 }} Core</strong>
+              <span>{{ copy.publicIpv4 }}</span>
+              <strong>{{ resource?.publicIpv4 || "-" }}</strong>
             </div>
             <div class="portal-summary-row">
-              <span>{{ copy.memory }}</span>
-              <strong>{{ detail.service.resourceSnapshot.memoryGB || 0 }} GB</strong>
+              <span>{{ copy.publicIpv6 }}</span>
+              <strong>{{ resource?.publicIpv6 || "-" }}</strong>
             </div>
             <div class="portal-summary-row">
-              <span>{{ copy.systemDisk }}</span>
-              <strong>{{ detail.service.resourceSnapshot.systemDiskGB || 0 }} GB</strong>
+              <span>{{ pickLabel(localeStore.locale, "操作系统", "Operating System") }}</span>
+              <strong>{{ resource?.operatingSystem || "-" }}</strong>
             </div>
             <div class="portal-summary-row">
-              <span>{{ copy.dataDisk }}</span>
-              <strong>{{ detail.service.resourceSnapshot.dataDiskGB || 0 }} GB</strong>
+              <span>{{ pickLabel(localeStore.locale, "登录账号", "Login User") }}</span>
+              <strong>{{ resource?.loginUsername || "-" }}</strong>
             </div>
             <div class="portal-summary-row">
-              <span>{{ copy.bandwidth }}</span>
-              <strong>{{ detail.service.resourceSnapshot.bandwidthMbps || 0 }} Mbps</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.loginUser }}</span>
-              <strong>{{ detail.service.resourceSnapshot.loginUsername || "-" }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.securityGroup }}</span>
-              <strong>{{ detail.service.resourceSnapshot.securityGroup || "-" }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.ipAddress }}</span>
-              <strong>{{ detail.service.resourceSnapshot.publicIpv4 || "-" }}</strong>
-            </div>
-            <div class="portal-summary-row">
-              <span>{{ copy.ipv6 }}</span>
-              <strong>{{ detail.service.resourceSnapshot.publicIpv6 || "-" }}</strong>
+              <span>{{ pickLabel(localeStore.locale, "安全组", "Security Group") }}</span>
+              <strong>{{ resource?.securityGroup || "-" }}</strong>
             </div>
           </div>
+        </article>
+      </section>
+
+      <section class="portal-grid portal-grid--two">
+        <article class="portal-card">
+          <div class="portal-card-head">
+            <div>
+              <h2 class="portal-panel__title">{{ copy.access }}</h2>
+              <div class="portal-panel__meta">{{ copy.accessDesc }}</div>
+            </div>
+          </div>
+          <div class="portal-summary" style="margin-top: 18px">
+            <div v-for="item in accessRows" :key="item.label" class="portal-summary-row">
+              <span>{{ item.label }}</span>
+              <div class="portal-toolbar" style="gap: 8px">
+                <strong>{{ item.value }}</strong>
+                <el-button v-if="item.copyable" link type="primary" @click="copyValue(item.value)">
+                  {{ pickLabel(localeStore.locale, "复制", "Copy") }}
+                </el-button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="portal-card">
+          <div class="portal-card-head">
+            <div>
+              <h2 class="portal-panel__title">{{ copy.network }}</h2>
+              <div class="portal-panel__meta">{{ copy.networkDesc }}</div>
+            </div>
+          </div>
+          <div class="portal-summary" style="margin-top: 18px">
+            <div v-for="item in networkRows" :key="item.label" class="portal-summary-row">
+              <span>{{ item.label }}</span>
+              <div class="portal-toolbar" style="gap: 8px">
+                <strong>{{ item.value }}</strong>
+                <el-button v-if="item.copyable" link type="primary" @click="copyValue(item.value)">
+                  {{ pickLabel(localeStore.locale, "复制", "Copy") }}
+                </el-button>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="portal-grid portal-grid--two">
+        <article class="portal-card">
+          <div class="portal-card-head">
+            <div>
+              <h2 class="portal-panel__title">{{ copy.billingDesk }}</h2>
+              <div class="portal-panel__meta">{{ copy.billingDeskDesc }}</div>
+            </div>
+          </div>
+          <div class="portal-actions-grid" style="margin-top: 18px">
+            <button type="button" class="portal-action-card" @click="openOrderCenter">
+              <strong>{{ copy.openOrders }}</strong>
+              <span>{{ detail.order?.orderNo || "-" }}</span>
+            </button>
+            <button type="button" class="portal-action-card" @click="openInvoice()">
+              <strong>{{ copy.openInvoices }}</strong>
+              <span>{{ detail.invoice?.invoiceNo || "-" }}</span>
+            </button>
+            <button type="button" class="portal-action-card" @click="router.push('/wallet/transactions')">
+              <strong>{{ pickLabel(localeStore.locale, "钱包中心", "Wallet") }}</strong>
+              <span>{{ pickLabel(localeStore.locale, "继续查看余额、授信和资金流水。", "Continue reviewing balance, credit, and transactions.") }}</span>
+            </button>
+            <button type="button" class="portal-action-card" @click="openTicketCenter('create')">
+              <strong>{{ copy.newTicket }}</strong>
+              <span>{{ pickLabel(localeStore.locale, "围绕账务或实例问题继续提单。", "Create a ticket for finance or instance issues.") }}</span>
+            </button>
+          </div>
+        </article>
+
+        <article class="portal-card">
+          <div class="portal-card-head">
+            <div>
+              <h2 class="portal-panel__title">{{ copy.changeDesk }}</h2>
+              <div class="portal-panel__meta">{{ copy.changeDeskDesc }}</div>
+            </div>
+          </div>
+          <div class="portal-grid portal-grid--four" style="margin-top: 18px">
+            <article class="portal-stat"><h3>{{ copy.changes }}</h3><strong>{{ changeStats.total }}</strong></article>
+            <article class="portal-stat"><h3>{{ copy.waitingPayment }}</h3><strong>{{ changeStats.waitingPayment }}</strong></article>
+            <article class="portal-stat"><h3>{{ copy.executingNow }}</h3><strong>{{ changeStats.executing }}</strong></article>
+            <article class="portal-stat"><h3>{{ copy.failedChanges }}</h3><strong>{{ changeStats.failed }}</strong></article>
+          </div>
+        </article>
+      </section>
+
+      <section class="portal-card">
+        <div class="portal-card-head">
+          <div>
+            <h2 class="portal-panel__title">{{ copy.timeline }}</h2>
+            <div class="portal-panel__meta">{{ copy.timelineDesc }}</div>
+          </div>
         </div>
+        <div v-if="serviceTimeline.length" class="portal-list" style="margin-top: 18px">
+          <div v-for="item in serviceTimeline" :key="`${item.time}-${item.title}-${item.subtitle}`" class="portal-list-item">
+            <div class="portal-list-item__meta">
+              <div class="portal-list-item__title">{{ item.title }}</div>
+              <div class="portal-list-item__desc">{{ item.subtitle }}</div>
+            </div>
+            <strong>{{ item.time }}</strong>
+          </div>
+        </div>
+        <div v-else class="portal-empty-state" style="margin-top: 18px">{{ copy.noChanges }}</div>
       </section>
 
       <section class="portal-card">
         <div class="portal-card-head">
           <div>
             <h2 class="portal-panel__title">{{ copy.config }}</h2>
-            <div class="portal-panel__meta">
-              {{ formatPortalConfiguration(detail.service.configuration, localeStore.locale) }}
-            </div>
           </div>
         </div>
-        <el-table v-if="detail.service.configuration?.length" :data="detail.service.configuration" border>
+        <el-table v-if="configurationRows.length" :data="configurationRows" border style="margin-top: 18px">
           <el-table-column prop="name" :label="copy.configName" min-width="180" />
           <el-table-column :label="copy.configValue" min-width="220">
-            <template #default="{ row }">{{ row.valueLabel || row.value || "-" }}</template>
+            <template #default="{ row }">{{ formatPortalConfiguration([row], localeStore.locale) }}</template>
           </el-table-column>
-          <el-table-column :label="copy.priceDelta" min-width="120">
+          <el-table-column :label="copy.configPrice" min-width="120">
             <template #default="{ row }">{{ formatPortalMoney(localeStore.locale, row.priceDelta) }}</template>
           </el-table-column>
         </el-table>
-        <div v-else class="portal-empty-state">{{ copy.emptyConfig }}</div>
+        <div v-else class="portal-empty-state" style="margin-top: 18px">{{ copy.noConfig }}</div>
+      </section>
+
+      <section class="portal-card">
+        <div class="portal-card-head">
+          <div>
+            <h2 class="portal-panel__title">{{ copy.billing }}</h2>
+          </div>
+        </div>
+        <div class="portal-summary" style="margin-top: 18px">
+          <div class="portal-summary-row">
+            <span>{{ copy.invoiceNo }}</span>
+            <strong>{{ detail.invoice?.invoiceNo || "-" }}</strong>
+          </div>
+          <div class="portal-summary-row">
+            <span>{{ copy.amount }}</span>
+            <strong>{{ formatPortalMoney(localeStore.locale, detail.invoice?.totalAmount || 0) }}</strong>
+          </div>
+          <div class="portal-summary-row">
+            <span>{{ copy.cycle }}</span>
+            <strong>{{ formatPortalBillingCycle(localeStore.locale, detail.invoice?.billingCycle) }}</strong>
+          </div>
+          <div class="portal-summary-row">
+            <span>{{ copy.invoiceStatus }}</span>
+            <el-tag :type="portalTagTypeByStatus(detail.invoice?.status)">
+              {{ formatPortalInvoiceStatus(localeStore.locale, detail.invoice?.status) }}
+            </el-tag>
+          </div>
+        </div>
       </section>
 
       <section class="portal-card">
         <div class="portal-card-head">
           <div>
             <h2 class="portal-panel__title">{{ copy.changes }}</h2>
-            <div class="portal-panel__meta">
-              {{ detail.invoice?.status === "UNPAID" ? copy.payInvoice : formatPortalInvoiceStatus(localeStore.locale, detail.invoice?.status) }}
-            </div>
           </div>
         </div>
-
-        <el-table v-if="detail.changeOrders.length" :data="detail.changeOrders" border>
-          <el-table-column prop="invoiceNo" :label="copy.invoiceNo" min-width="160" />
-          <el-table-column prop="orderNo" :label="copy.orderNo" min-width="160" />
-          <el-table-column :label="copy.changeAction" min-width="140">
-            <template #default="{ row }">{{ changeActionLabel(row.actionName) }}</template>
-          </el-table-column>
-          <el-table-column prop="title" :label="copy.changeTitle" min-width="220" show-overflow-tooltip />
+        <el-table v-if="changeOrders.length" :data="changeOrders" border style="margin-top: 18px">
+          <el-table-column prop="title" :label="copy.changeTitle" min-width="220" />
+          <el-table-column prop="actionName" :label="copy.changeAction" min-width="140" />
           <el-table-column :label="copy.amount" min-width="120">
             <template #default="{ row }">{{ formatPortalMoney(localeStore.locale, row.amount) }}</template>
           </el-table-column>
-          <el-table-column :label="copy.invoiceStatus" min-width="120">
+          <el-table-column :label="copy.cycle" min-width="120">
+            <template #default="{ row }">{{ formatPortalBillingCycle(localeStore.locale, row.billingCycle) }}</template>
+          </el-table-column>
+          <el-table-column :label="copy.execution" min-width="120">
             <template #default="{ row }">
-              <el-tag :type="invoiceStatusTag(row.status)" effect="light">
-                {{ formatPortalInvoiceStatus(localeStore.locale, row.status) }}
-              </el-tag>
+              <el-tag :type="executionType(row.executionStatus)">{{ executionLabel(row.executionStatus) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="copy.executionStatus" min-width="140">
+          <el-table-column prop="createdAt" :label="copy.createdAt" min-width="160" />
+          <el-table-column :label="copy.action" min-width="120" fixed="right">
             <template #default="{ row }">
-              <el-tag :type="executionTagType(row.executionStatus)" effect="light">
-                {{ executionLabel(row.executionStatus) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="copy.billingCycle" min-width="120">
-            <template #default="{ row }">
-              {{ formatPortalBillingCycle(localeStore.locale, row.billingCycle) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="createdAt" :label="copy.changeCreatedAt" min-width="180" />
-          <el-table-column :label="copy.action" min-width="160" fixed="right">
-            <template #default="{ row }">
-              <div class="service-table-actions">
-                <el-button type="primary" link @click="openChangeInvoice(row)">
-                  {{ copy.openInvoice }}
-                </el-button>
-                <el-button type="primary" link @click="openTicketList">
-                  {{ copy.ticketList }}
-                </el-button>
-              </div>
+              <el-button link type="primary" @click="openChangeInvoice(row)">{{ copy.openInvoice }}</el-button>
             </template>
           </el-table-column>
         </el-table>
-        <div v-else class="portal-empty-state">{{ copy.emptyChanges }}</div>
+        <div v-else class="portal-empty-state" style="margin-top: 18px">{{ copy.noChanges }}</div>
       </section>
     </template>
   </div>
 </template>
-
-<style scoped>
-.service-link-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.service-link-card {
-  padding: 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background:
-    radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 45%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.94));
-  display: grid;
-  gap: 10px;
-}
-
-.service-link-card strong {
-  font-size: 20px;
-  color: #0f172a;
-}
-
-.service-link-card__label {
-  font-size: 13px;
-  color: #64748b;
-}
-
-.service-link-card__meta {
-  min-height: 24px;
-  color: #475569;
-  font-size: 13px;
-}
-
-.service-link-card__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.service-table-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-@media (max-width: 1280px) {
-  .service-link-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 768px) {
-  .service-link-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

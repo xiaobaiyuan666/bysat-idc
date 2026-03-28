@@ -17,8 +17,10 @@ import {
   runServiceAction,
   syncMofangService,
   updateServiceRecord,
+  type AuditLog,
   type MofangBackup,
   type MofangDisk,
+  type MofangResourceActionResponse,
   type MofangServiceResourcesResponse,
   type MofangSnapshot,
   type MofangSyncLogItem,
@@ -51,6 +53,44 @@ type ResourceDialogAction =
   | "create-backup"
   | "";
 
+type ResourceActionName =
+  | "add-ipv4"
+  | "add-ipv6"
+  | "add-disk"
+  | "resize-disk"
+  | "create-snapshot"
+  | "create-backup"
+  | "delete-snapshot"
+  | "restore-snapshot"
+  | "delete-backup"
+  | "restore-backup";
+
+type ResourceActionFollowUp = {
+  action: ResourceActionName;
+  title: string;
+  payload: Record<string, unknown>;
+  result: MofangResourceActionResponse;
+  hasBillingImpact: boolean;
+  periodAmount: number;
+  summary: string;
+};
+
+type ResourceTimelineItem = {
+  id: string;
+  source: "FOLLOW_UP" | "SYNC" | "CHANGE_ORDER" | "AUDIT";
+  createdAt: string;
+  category: string;
+  title: string;
+  statusText: string;
+  statusType: "success" | "warning" | "danger" | "info" | "primary";
+  summary: string;
+  invoiceId?: number;
+  orderId?: number;
+  syncLog?: MofangSyncLogItem;
+  changeOrder?: ServiceDetailResponse["changeOrders"][number];
+  auditLog?: AuditLog;
+};
+
 const route = useRoute();
 const router = useRouter();
 const localeStore = useLocaleStore();
@@ -60,22 +100,33 @@ const syncLoading = ref(false);
 const actionLoading = ref("");
 const resourceLoading = ref("");
 const changeOrderLoading = ref(false);
+const retryingSyncLogId = ref(0);
 const detail = ref<ServiceDetailResponse | null>(null);
 const resources = ref<MofangServiceResourcesResponse | null>(null);
 const providerAccounts = ref<ProviderAccount[]>([]);
 const syncLogs = ref<MofangSyncLogItem[]>([]);
+const resourceActionFollowUp = ref<ResourceActionFollowUp | null>(null);
 
 const editVisible = ref(false);
+const syncReviewVisible = ref(false);
+const resourceFollowUpVisible = ref(false);
 const resetVisible = ref(false);
 const reinstallVisible = ref(false);
 const resourceVisible = ref(false);
 const resourceAction = ref<ResourceDialogAction>("");
 const resourceTargetId = ref("");
+const reviewingSyncLog = ref<MofangSyncLogItem | null>(null);
 
 const savingEdit = ref(false);
+const savingSyncReview = ref(false);
 const resetForm = reactive({ password: "" });
 const reinstallForm = reactive({ imageName: "Ubuntu 24.04.1 LTS" });
 const resourceForm = reactive({ count: 1, sizeGb: 10, driver: "virtio", name: "" });
+const syncReviewForm = reactive({
+  targetStatus: "SUCCESS",
+  syncMessage: "",
+  reason: ""
+});
 const editForm = reactive({
   providerType: "MOFANG_CLOUD",
   providerAccountId: 0,
@@ -408,6 +459,124 @@ const resourceSummary = computed(() => ({
   snapshotCount: resources.value?.snapshots.length ?? 0,
   backupCount: resources.value?.backups.length ?? 0
 }));
+
+const resourceFollowUpSummary = computed(() => {
+  const followUp = resourceActionFollowUp.value;
+  if (!followUp || !detail.value) return null;
+  return {
+    actionTitle: followUp.title,
+    message: followUp.result.message,
+    remoteId: followUp.result.remoteId || detail.value.service.providerResourceId || "-",
+    resourceId: followUp.result.resourceId || "-",
+    syncOperation: followUp.result.syncItem?.operation || "-",
+    syncMessage: followUp.result.syncItem?.message || detail.value.service.syncMessage || "-",
+    hasBillingImpact: followUp.hasBillingImpact,
+    periodAmount: followUp.periodAmount,
+    summary: followUp.summary,
+    powered: followUp.result.poweredOff
+      ? "已自动关机"
+      : followUp.result.poweredOn
+        ? "已自动开机"
+        : "未触发电源动作"
+  };
+});
+
+function containsResourceKeyword(text: string) {
+  const source = text.toLowerCase();
+  return ["resource", "sync", "snapshot", "backup", "disk", "ip", "服务", "同步", "资源", "改配"].some(keyword =>
+    source.includes(keyword)
+  );
+}
+
+const resourceActionHistory = computed<ResourceTimelineItem[]>(() => {
+  const rows: ResourceTimelineItem[] = [];
+
+  if (resourceActionFollowUp.value) {
+    rows.push({
+      id: `followup-${resourceActionFollowUp.value.result.action}-${resourceActionFollowUp.value.result.resourceId || resourceActionFollowUp.value.result.remoteId}`,
+      source: "FOLLOW_UP",
+      createdAt: new Date().toISOString(),
+      category: "本次动作",
+      title: resourceActionFollowUp.value.title,
+      statusText: "待收口",
+      statusType: "primary",
+      summary: resourceActionFollowUp.value.result.message
+    });
+  }
+
+  for (const row of syncLogs.value) {
+    rows.push({
+      id: `sync-${row.id}`,
+      source: "SYNC",
+      createdAt: row.createdAt,
+      category: "同步日志",
+      title: formatSyncLogAction(localeStore.locale, row.action),
+      statusText: formatSyncStatus(localeStore.locale, row.status),
+      statusType: syncLogType(row.status) as "success" | "warning" | "danger" | "info" | "primary",
+      summary: row.message || `${formatResourceType(localeStore.locale, row.resourceType)} / ${row.resourceId || "-"}`,
+      invoiceId: row.invoiceId,
+      orderId: row.orderId,
+      syncLog: row
+    });
+  }
+
+  for (const row of detail.value?.changeOrders ?? []) {
+    rows.push({
+      id: `change-${row.id}`,
+      source: "CHANGE_ORDER",
+      createdAt: row.createdAt,
+      category: "改配单",
+      title: row.title || changeOrderActionLabel(row.actionName),
+      statusText: `${changeOrderStatusLabel(row.status)} / ${changeOrderExecutionLabel(row.executionStatus)}`,
+      statusType:
+        row.executionStatus === "FAILED" || row.executionStatus === "EXECUTE_FAILED"
+          ? "danger"
+          : row.status === "PAID"
+            ? "success"
+            : row.status === "UNPAID"
+              ? "warning"
+              : "info",
+      summary: row.executionMessage || `账单 ${row.invoiceNo} / 订单 ${row.orderNo}`,
+      invoiceId: row.invoiceId,
+      orderId: row.orderId,
+      changeOrder: row
+    });
+  }
+
+  for (const row of detail.value?.auditLogs ?? []) {
+    const payloadText = row.payload ? JSON.stringify(row.payload) : "";
+    if (!containsResourceKeyword(`${row.action} ${row.description} ${payloadText}`)) continue;
+    rows.push({
+      id: `audit-${row.id}`,
+      source: "AUDIT",
+      createdAt: row.createdAt,
+      category: "审计记录",
+      title: row.action || "服务审计",
+      statusText: row.target || "已记录",
+      statusType: "info",
+      summary: row.description || payloadText || "服务动作已写入审计",
+      auditLog: row
+    });
+  }
+
+  return rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+});
+
+const resourceActionHistorySummary = computed(() => ({
+  total: resourceActionHistory.value.length,
+  sync: resourceActionHistory.value.filter(item => item.source === "SYNC").length,
+  changeOrders: resourceActionHistory.value.filter(item => item.source === "CHANGE_ORDER").length,
+  audit: resourceActionHistory.value.filter(item => item.source === "AUDIT").length,
+  pending: resourceActionHistory.value.filter(item => item.statusType === "warning" || item.statusType === "primary").length,
+  failed: resourceActionHistory.value.filter(item => item.statusType === "danger").length
+}));
+
+const syncLogFilter = ref<"ALL" | "FAILED" | "RUNNING" | "SUCCESS">("ALL");
+
+const filteredSyncLogs = computed(() => {
+  if (syncLogFilter.value === "ALL") return syncLogs.value;
+  return syncLogs.value.filter(item => item.status === syncLogFilter.value);
+});
 
 const channelStrategyGuide = computed(() => {
   if (isMofangService.value) {
@@ -854,6 +1023,103 @@ function openChangeOrderFailureTicket(row: {
   });
 }
 
+function openSyncFailureTicket(row: MofangSyncLogItem) {
+  if (!detail.value) return;
+  openTicketCreateWorkbench({
+    title: `${detail.value.service.serviceNo} / 同步异常 / ${formatSyncLogAction(localeStore.locale, row.action)}`,
+    content: [
+      `服务号：${detail.value.service.serviceNo}`,
+      `资源类型：${formatResourceType(localeStore.locale, row.resourceType)}`,
+      `资源编号：${row.resourceId || "-"}`,
+      `同步状态：${formatSyncStatus(localeStore.locale, row.status)}`,
+      `失败回执：${row.message || "请管理员核对自动化任务与远端资源"}`
+    ].join("\n")
+  });
+}
+
+function openSyncReviewDialog(row: MofangSyncLogItem) {
+  if (!detail.value) return;
+  reviewingSyncLog.value = row;
+  syncReviewForm.targetStatus = row.status === "RUNNING" ? "RUNNING" : "SUCCESS";
+  syncReviewForm.syncMessage = row.message
+    ? `人工复核：${row.message}`
+    : `${formatSyncLogAction(localeStore.locale, row.action)} 已人工复核`;
+  syncReviewForm.reason = `围绕同步日志 ${formatSyncLogAction(localeStore.locale, row.action)} 做人工收口`;
+  syncReviewVisible.value = true;
+}
+
+function buildSyntheticSyncLogFromFollowUp(): MofangSyncLogItem | null {
+  if (!detail.value || !resourceActionFollowUp.value) return null;
+  const followUp = resourceActionFollowUp.value;
+  return {
+    id: 0,
+    providerType: detail.value.service.providerType,
+    action: followUp.action,
+    resourceType: inferResourceTypeFromAction(followUp.action),
+    resourceId: followUp.result.resourceId || followUp.result.remoteId || "",
+    serviceId: detail.value.service.id,
+    status: detail.value.service.syncStatus || followUp.result.syncItem?.status || "PENDING",
+    message: followUp.result.syncItem?.message || followUp.result.message || "",
+    createdAt: new Date().toISOString()
+  };
+}
+
+function openResourceFollowUpSyncReview() {
+  const target = syncLogs.value[0] || buildSyntheticSyncLogFromFollowUp();
+  if (!target) return;
+  resourceFollowUpVisible.value = false;
+  openSyncReviewDialog(target);
+}
+
+async function retrySyncLog(row: MofangSyncLogItem) {
+  if (!detail.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `将重新发起当前服务的同步流程，用于重试“${formatSyncLogAction(localeStore.locale, row.action)}”。继续吗？`,
+      "重新同步确认",
+      {
+        type: "warning",
+        confirmButtonText: "重新同步",
+        cancelButtonText: "取消"
+      }
+    );
+  } catch {
+    return;
+  }
+
+  retryingSyncLogId.value = row.id;
+  try {
+    const result = await syncMofangService(detail.value.service.id);
+    ElMessage.success(result.message || "同步任务已重新发起");
+    await loadDetail();
+  } catch (error: any) {
+    ElMessage.error(error?.message ?? "同步重试失败");
+  } finally {
+    retryingSyncLogId.value = 0;
+  }
+}
+
+async function submitSyncReview() {
+  if (!detail.value || !reviewingSyncLog.value) return;
+  savingSyncReview.value = true;
+  try {
+    await updateServiceRecord(detail.value.service.id, {
+      syncStatus: syncReviewForm.targetStatus,
+      syncMessage: syncReviewForm.syncMessage.trim(),
+      reason:
+        syncReviewForm.reason.trim() ||
+        `围绕同步日志 ${formatSyncLogAction(localeStore.locale, reviewingSyncLog.value.action)} 做人工收口`
+    });
+    syncReviewVisible.value = false;
+    ElMessage.success("同步状态已人工收口");
+    await loadDetail();
+  } catch (error: any) {
+    ElMessage.error(error?.message ?? "同步人工收口失败");
+  } finally {
+    savingSyncReview.value = false;
+  }
+}
+
 function openProviderAutomationContext(params?: { orderId?: number; invoiceId?: number }) {
   if (!detail.value) return;
   void router.push({
@@ -865,6 +1131,27 @@ function openProviderAutomationContext(params?: { orderId?: number; invoiceId?: 
       invoiceId: params?.invoiceId ? String(params.invoiceId) : undefined
     }
   });
+}
+
+function inferResourceTypeFromAction(action: ResourceActionName) {
+  switch (action) {
+    case "add-ipv4":
+    case "add-ipv6":
+      return "IP";
+    case "add-disk":
+    case "resize-disk":
+      return "DISK";
+    case "create-snapshot":
+    case "delete-snapshot":
+    case "restore-snapshot":
+      return "SNAPSHOT";
+    case "create-backup":
+    case "delete-backup":
+    case "restore-backup":
+      return "BACKUP";
+    default:
+      return "INSTANCE";
+  }
 }
 
 function openResourceDialog(action: ResourceDialogAction, payload?: { id?: string; sizeGb?: number }) {
@@ -881,6 +1168,31 @@ function closeResourceDialog() {
   resourceVisible.value = false;
   resourceAction.value = "";
   resourceTargetId.value = "";
+}
+
+function createResourceActionSnapshot(action: ResourceActionName, title: string, payload: Record<string, unknown>) {
+  return {
+    action,
+    title,
+    payload,
+    hasBillingImpact: resourceBillingImpact.value.hasImpact,
+    periodAmount: resourceBillingImpact.value.periodAmount,
+    summary: resourceBillingImpact.value.summary
+  };
+}
+
+async function finalizeResourceAction(
+  result: MofangResourceActionResponse,
+  snapshot: ReturnType<typeof createResourceActionSnapshot>,
+  closeDialog = true
+) {
+  if (closeDialog) closeResourceDialog();
+  await loadDetail();
+  resourceActionFollowUp.value = {
+    ...snapshot,
+    result
+  };
+  resourceFollowUpVisible.value = true;
 }
 
 function buildResourcePayload() {
@@ -902,12 +1214,13 @@ function buildResourcePayload() {
 
 async function submitResourceDialog() {
   if (!detail.value || !resourceAction.value) return;
+  const payload = buildResourcePayload();
+  const snapshot = createResourceActionSnapshot(resourceAction.value, resourceActionGuide.value.title, payload);
   resourceLoading.value = resourceAction.value;
   try {
-    const result = await runMofangServiceResourceAction(detail.value.service.id, resourceAction.value, buildResourcePayload());
+    const result = await runMofangServiceResourceAction(detail.value.service.id, resourceAction.value, payload);
     ElMessage.success(result.message);
-    closeResourceDialog();
-    await loadDetail();
+    await finalizeResourceAction(result, snapshot);
   } catch (error: any) {
     ElMessage.error(error?.message ?? "资源动作执行失败");
   } finally {
@@ -915,19 +1228,26 @@ async function submitResourceDialog() {
   }
 }
 
-async function handleCreateServiceChangeOrder() {
-  if (!detail.value || !resourceAction.value || !resourceBillingImpact.value.hasImpact) return;
+async function createChangeOrderForResourceAction(snapshot: {
+  action: string;
+  title: string;
+  payload: Record<string, unknown>;
+  hasBillingImpact: boolean;
+  periodAmount: number;
+}) {
+  if (!detail.value || !snapshot.hasBillingImpact) return;
   changeOrderLoading.value = true;
   try {
     const result = await createServiceChangeOrder(detail.value.service.id, {
-      actionName: resourceAction.value,
-      title: `${resourceActionGuide.value.title} 改配单`,
+      actionName: snapshot.action,
+      title: `${snapshot.title} 改配单`,
       billingCycle: detail.value.invoice?.billingCycle || detail.value.order?.billingCycle || resourceBillingImpact.value.cycle || "monthly",
-      amount: Number(resourceBillingImpact.value.periodAmount.toFixed(2)),
-      reason: `服务改配：${resourceActionGuide.value.title}`,
-      payload: buildResourcePayload()
+      amount: Number(snapshot.periodAmount.toFixed(2)),
+      reason: `服务改配：${snapshot.title}`,
+      payload: snapshot.payload
     });
     ElMessage.success(`已生成改配单：${result.invoice.invoiceNo}`);
+    resourceFollowUpVisible.value = false;
     closeResourceDialog();
     await router.push(`/billing/invoices/${result.invoice.id}`);
   } catch (error: any) {
@@ -935,6 +1255,18 @@ async function handleCreateServiceChangeOrder() {
   } finally {
     changeOrderLoading.value = false;
   }
+}
+
+async function handleCreateServiceChangeOrder() {
+  if (!detail.value || !resourceAction.value || !resourceBillingImpact.value.hasImpact) return;
+  await createChangeOrderForResourceAction(
+    createResourceActionSnapshot(resourceAction.value, resourceActionGuide.value.title, buildResourcePayload())
+  );
+}
+
+async function handleCreateServiceChangeOrderFromFollowUp() {
+  if (!resourceActionFollowUp.value) return;
+  await createChangeOrderForResourceAction(resourceActionFollowUp.value);
 }
 
 async function confirmResourceAction(
@@ -951,9 +1283,17 @@ async function confirmResourceAction(
 
   resourceLoading.value = action;
   try {
+    const snapshot = {
+      action,
+      title: label,
+      payload,
+      hasBillingImpact: false,
+      periodAmount: 0,
+      summary: "当前动作不产生改配费用，建议重点核对自动化任务和资源同步状态。"
+    };
     const result = await runMofangServiceResourceAction(detail.value.service.id, action, payload);
     ElMessage.success(result.message);
-    await loadDetail();
+    await finalizeResourceAction(result, snapshot, false);
   } catch (error: any) {
     ElMessage.error(error?.message ?? "资源动作执行失败");
   } finally {
@@ -1587,13 +1927,18 @@ onMounted(async () => {
                 <span>围绕当前服务的同步回执、资源状态和财务收口继续处理</span>
               </div>
               <div class="inline-actions">
+                <el-button plain :loading="syncLoading" @click="handleSync">重新同步服务</el-button>
+                <el-button plain @click="syncLogFilter = 'ALL'">全部日志</el-button>
+                <el-button plain @click="syncLogFilter = 'FAILED'">失败日志</el-button>
+                <el-button plain @click="syncLogFilter = 'RUNNING'">执行中</el-button>
+                <el-button plain @click="syncLogFilter = 'SUCCESS'">成功日志</el-button>
                 <el-button plain @click="openCustomerFinanceWorkbench">客户财务</el-button>
                 <el-button plain @click="openTicketListWorkbench">工单中心</el-button>
                 <el-button plain @click="openProviderResourcesWorkbench">渠道资源</el-button>
                 <el-button plain @click="openProviderAutomationWorkbench">自动化任务</el-button>
               </div>
             </div>
-            <el-table :data="syncLogs" border stripe empty-text="当前服务暂无同步日志">
+            <el-table :data="filteredSyncLogs" border stripe empty-text="当前服务暂无同步日志">
               <el-table-column prop="createdAt" label="时间" min-width="180" />
               <el-table-column label="动作" min-width="140">
                 <template #default="{ row }">{{ formatSyncLogAction(localeStore.locale, row.action) }}</template>
@@ -1623,12 +1968,106 @@ onMounted(async () => {
                     <el-button type="primary" link @click="openCustomerFinanceWorkbench">财务</el-button>
                     <el-button type="primary" link @click="openProviderResourcesWorkbench">资源</el-button>
                     <el-button
+                      v-if="row.status === 'FAILED'"
+                      type="warning"
+                      link
+                      :loading="retryingSyncLogId === row.id"
+                      @click="retrySyncLog(row)"
+                    >
+                      重试同步
+                    </el-button>
+                    <el-button
+                      v-if="row.status !== 'SUCCESS'"
+                      type="primary"
+                      link
+                      @click="openSyncReviewDialog(row)"
+                    >
+                      人工收口
+                    </el-button>
+                    <el-button
+                      v-if="row.status === 'FAILED'"
+                      type="warning"
+                      link
+                      @click="openSyncFailureTicket(row)"
+                    >
+                      异常工单
+                    </el-button>
+                    <el-button
                       type="primary"
                       link
                       @click="openProviderAutomationContext({ orderId: row.orderId, invoiceId: row.invoiceId })"
                     >
                       任务
                     </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <el-tab-pane label="资源动作追踪">
+            <div class="summary-strip" style="margin-bottom: 16px">
+              <div class="summary-pill"><span>总记录</span><strong>{{ resourceActionHistorySummary.total }}</strong></div>
+              <div class="summary-pill"><span>同步日志</span><strong>{{ resourceActionHistorySummary.sync }}</strong></div>
+              <div class="summary-pill"><span>改配单</span><strong>{{ resourceActionHistorySummary.changeOrders }}</strong></div>
+              <div class="summary-pill"><span>审计</span><strong>{{ resourceActionHistorySummary.audit }}</strong></div>
+              <div class="summary-pill"><span>待收口</span><strong>{{ resourceActionHistorySummary.pending }}</strong></div>
+              <div class="summary-pill"><span>异常</span><strong>{{ resourceActionHistorySummary.failed }}</strong></div>
+            </div>
+            <div class="table-toolbar">
+              <div class="table-toolbar__meta">
+                <strong>资源动作追踪台</strong>
+                <span>把资源动作、同步、改配和审计合并到一处查看，方便客服和运维连续处理。</span>
+              </div>
+              <div class="inline-actions">
+                <el-button plain @click="openProviderResourcesWorkbench">渠道资源</el-button>
+                <el-button plain @click="openProviderAutomationWorkbench">自动化任务</el-button>
+                <el-button plain @click="openTicketListWorkbench">工单中心</el-button>
+              </div>
+            </div>
+            <el-table :data="resourceActionHistory" border stripe empty-text="当前服务暂无资源动作追踪记录">
+              <el-table-column prop="createdAt" label="时间" min-width="180" />
+              <el-table-column prop="category" label="来源" min-width="110" />
+              <el-table-column prop="title" label="动作/标题" min-width="220" show-overflow-tooltip />
+              <el-table-column label="状态" min-width="150">
+                <template #default="{ row }">
+                  <el-tag :type="row.statusType" effect="light">{{ row.statusText }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="summary" label="摘要" min-width="320" show-overflow-tooltip />
+              <el-table-column label="操作" min-width="360" fixed="right">
+                <template #default="{ row }">
+                  <div class="inline-actions">
+                    <el-button v-if="row.orderId" type="primary" link @click="router.push(`/orders/detail/${row.orderId}`)">订单</el-button>
+                    <el-button v-if="row.invoiceId" type="primary" link @click="router.push(`/billing/invoices/${row.invoiceId}`)">账单</el-button>
+                    <el-button v-if="row.invoiceId" type="primary" link @click="openPaymentsWorkbench(row.invoiceId)">支付</el-button>
+                    <el-button v-if="row.invoiceId" type="primary" link @click="openRefundsWorkbench(row.invoiceId)">退款</el-button>
+                    <el-button
+                      v-if="row.syncLog && row.syncLog.status === 'FAILED'"
+                      type="warning"
+                      link
+                      @click="retrySyncLog(row.syncLog)"
+                    >
+                      重试同步
+                    </el-button>
+                    <el-button
+                      v-if="row.syncLog && row.syncLog.status !== 'SUCCESS'"
+                      type="primary"
+                      link
+                      @click="openSyncReviewDialog(row.syncLog)"
+                    >
+                      人工收口
+                    </el-button>
+                    <el-button
+                      v-if="row.changeOrder && (row.changeOrder.executionStatus === 'FAILED' || row.changeOrder.executionStatus === 'EXECUTE_FAILED')"
+                      type="warning"
+                      link
+                      @click="openChangeOrderFailureTicket(row.changeOrder)"
+                    >
+                      异常工单
+                    </el-button>
+                    <el-button type="primary" link @click="openProviderResourcesWorkbench">资源</el-button>
+                    <el-button type="primary" link @click="openProviderAutomationWorkbench">任务</el-button>
                   </div>
                 </template>
               </el-table-column>
@@ -1808,6 +2247,126 @@ onMounted(async () => {
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
         <el-button type="primary" :loading="savingEdit" @click="submitServiceEdit">保存调整</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="syncReviewVisible" title="同步人工收口" width="520px">
+      <el-form v-if="reviewingSyncLog" label-position="top">
+        <el-alert
+          title="用于人工核对远端资源、自动化任务和本地服务状态后，手动完成同步闭环。"
+          :description="`当前收口对象：${formatSyncLogAction(localeStore.locale, reviewingSyncLog.action)} / ${formatResourceType(localeStore.locale, reviewingSyncLog.resourceType)} / ${reviewingSyncLog.resourceId || '-'}`"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+        <div class="summary-strip" style="margin-bottom: 16px">
+          <div class="summary-pill">
+            <span>日志状态</span>
+            <strong>{{ formatSyncStatus(localeStore.locale, reviewingSyncLog.status) }}</strong>
+          </div>
+          <div class="summary-pill">
+            <span>当前服务同步</span>
+            <strong>{{ formatSyncStatus(localeStore.locale, detail?.service.syncStatus || 'PENDING') }}</strong>
+          </div>
+          <div class="summary-pill">
+            <span>服务号</span>
+            <strong>{{ detail?.service.serviceNo || "-" }}</strong>
+          </div>
+        </div>
+        <el-form-item label="收口后的同步状态">
+          <el-select v-model="syncReviewForm.targetStatus" style="width: 100%">
+            <el-option v-for="item in syncStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="同步说明">
+          <el-input
+            v-model="syncReviewForm.syncMessage"
+            type="textarea"
+            :rows="3"
+            placeholder="例如：已人工核对远端资源状态正常，本地同步状态改为成功"
+          />
+        </el-form-item>
+        <el-form-item label="变更原因">
+          <el-input
+            v-model="syncReviewForm.reason"
+            type="textarea"
+            :rows="3"
+            placeholder="例如：重试后远端实例已存在，人工确认收口"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="syncReviewVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingSyncReview" @click="submitSyncReview">确认收口</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="resourceFollowUpVisible" title="资源动作收口面板" width="620px">
+      <template v-if="resourceFollowUpSummary">
+        <el-alert
+          :title="`${resourceFollowUpSummary.actionTitle} 已提交`"
+          :description="resourceFollowUpSummary.message"
+          type="success"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+        <div class="summary-strip" style="margin-bottom: 16px">
+          <div class="summary-pill">
+            <span>服务号</span>
+            <strong>{{ detail?.service.serviceNo || "-" }}</strong>
+          </div>
+          <div class="summary-pill">
+            <span>远端实例</span>
+            <strong>{{ resourceFollowUpSummary.remoteId }}</strong>
+          </div>
+          <div class="summary-pill">
+            <span>资源对象</span>
+            <strong>{{ resourceFollowUpSummary.resourceId }}</strong>
+          </div>
+          <div class="summary-pill">
+            <span>同步动作</span>
+            <strong>{{ resourceFollowUpSummary.syncOperation }}</strong>
+          </div>
+          <div class="summary-pill">
+            <span>执行附带</span>
+            <strong>{{ resourceFollowUpSummary.powered }}</strong>
+          </div>
+        </div>
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          :title="`同步回执：${resourceFollowUpSummary.syncMessage}`"
+          description="建议按“自动化任务 -> 渠道资源 -> 人工收口/改配单”的顺序继续处理。"
+          style="margin-bottom: 16px"
+        />
+        <el-alert
+          v-if="resourceFollowUpSummary.hasBillingImpact"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`建议改配金额 ${formatMoney(localeStore.locale, resourceFollowUpSummary.periodAmount)}`"
+          :description="resourceFollowUpSummary.summary"
+          style="margin-bottom: 16px"
+        />
+      </template>
+      <template #footer>
+        <el-button @click="resourceFollowUpVisible = false">关闭</el-button>
+        <el-button plain @click="openProviderResourcesWorkbench">渠道资源</el-button>
+        <el-button plain @click="openProviderAutomationWorkbench">自动化任务</el-button>
+        <el-button plain :loading="syncLoading" @click="handleSync">重新同步服务</el-button>
+        <el-button type="primary" plain @click="openResourceFollowUpSyncReview">人工收口</el-button>
+        <el-button
+          v-if="resourceActionFollowUp?.hasBillingImpact"
+          type="warning"
+          plain
+          :loading="changeOrderLoading"
+          @click="handleCreateServiceChangeOrderFromFollowUp"
+        >
+          生成改配单
+        </el-button>
       </template>
     </el-dialog>
 

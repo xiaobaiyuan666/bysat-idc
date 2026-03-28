@@ -15,9 +15,13 @@ import (
 	customerHandler "idc-finance/internal/modules/customer/handler"
 	customerRepository "idc-finance/internal/modules/customer/repository"
 	customerService "idc-finance/internal/modules/customer/service"
+	orderDTO "idc-finance/internal/modules/order/dto"
 	orderHandler "idc-finance/internal/modules/order/handler"
 	orderRepository "idc-finance/internal/modules/order/repository"
 	orderService "idc-finance/internal/modules/order/service"
+	pluginHandler "idc-finance/internal/modules/plugin/handler"
+	pluginRepository "idc-finance/internal/modules/plugin/repository"
+	pluginService "idc-finance/internal/modules/plugin/service"
 	portalHandler "idc-finance/internal/modules/portal/handler"
 	portalService "idc-finance/internal/modules/portal/service"
 	providerHandler "idc-finance/internal/modules/provider/handler"
@@ -76,6 +80,27 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 	portalSvc := portalService.New(customerSvc, orderSvc)
 	portalHTTP := portalHandler.New(portalSvc)
 
+	pluginRepo := buildPluginRepository(cfg, db)
+	pluginSvc := pluginService.New(pluginRepo, auditService)
+	pluginSvc.SetSiteURL(cfg.SiteURL)
+	pluginSvc.SetOnPaymentSuccess(func(customerID int64, amount float64, orderNo string) error {
+		_, _, err := orderSvc.AdjustCustomerWallet(
+			customerID,
+			orderDTO.AdjustWalletRequest{
+				Target:    "BALANCE",
+				Operation: "INCREASE",
+				Amount:    amount,
+				Summary:   "在线充值（易支付）",
+				Remark:    "订单号: " + orderNo,
+			},
+			0,
+			"SYSTEM-EPAY",
+			"epay-notify-"+orderNo,
+		)
+		return err
+	})
+	pluginHTTP := pluginHandler.New(pluginSvc)
+
 	api := engine.Group("/api/v1")
 	api.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -94,6 +119,8 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 	admin := api.Group("/admin")
 	authGroup := admin.Group("/auth")
 	auth.RegisterRoutes(authGroup)
+	portalAuthGroup := api.Group("/portal/auth")
+	auth.RegisterPortalRoutes(portalAuthGroup)
 
 	protected := admin.Group("")
 	protected.Use(auth.AdminGuard())
@@ -181,6 +208,7 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 	providerHTTP.RegisterAdminRoutes(protected)
 	automationHTTP.RegisterRoutes(protected)
 	reportHTTP.RegisterRoutes(protected)
+	pluginHTTP.RegisterAdminRoutes(protected)
 
 	portal := api.Group("/portal")
 	portal.Use(auth.PortalGuard())
@@ -188,6 +216,10 @@ func NewRouter(cfg config.AppConfig, db *sql.DB) *gin.Engine {
 	orderHTTP.RegisterPortalRoutes(portal)
 	ticketHTTP.RegisterPortalRoutes(portal)
 	portalHTTP.RegisterRoutes(portal)
+	pluginHTTP.RegisterPortalRoutes(portal)
+
+	open := api.Group("/open")
+	pluginHTTP.RegisterPublicRoutes(open)
 
 	return engine
 }
@@ -239,4 +271,11 @@ func buildTicketRepository(cfg config.AppConfig, db *sql.DB) ticketRepository.Re
 		return ticketRepository.NewMySQLRepository(db)
 	}
 	return ticketRepository.NewMemoryRepository()
+}
+
+func buildPluginRepository(cfg config.AppConfig, db *sql.DB) pluginRepository.Repository {
+	if cfg.StorageDriver == "mysql" && db != nil {
+		return pluginRepository.NewMySQLRepository(db)
+	}
+	return pluginRepository.NewMemoryRepository()
 }

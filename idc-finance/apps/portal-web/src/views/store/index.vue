@@ -33,6 +33,14 @@ const selectedOptions = reactive<Record<number, Record<string, string>>>({});
 
 const groupOptions = computed(() => Array.from(new Set(products.value.map(item => item.groupName).filter(Boolean))));
 const typeOptions = computed(() => Array.from(new Set(products.value.map(item => item.productType).filter(Boolean))));
+const groupSummary = computed(() => {
+  const summary = new Map<string, number>();
+  for (const product of filteredProducts.value) {
+    const key = product.groupName || pickLabel(localeStore.locale, "未分组", "Ungrouped");
+    summary.set(key, (summary.get(key) || 0) + 1);
+  }
+  return Array.from(summary.entries()).map(([name, count]) => ({ name, count }));
+});
 
 const filteredProducts = computed(() =>
   products.value.filter(product => {
@@ -41,7 +49,7 @@ const filteredProducts = computed(() =>
       !text ||
       product.name.toLowerCase().includes(text) ||
       product.productNo.toLowerCase().includes(text) ||
-      product.groupName.toLowerCase().includes(text);
+      String(product.groupName ?? "").toLowerCase().includes(text);
     const matchesGroup = !groupFilter.value || product.groupName === groupFilter.value;
     const matchesType = !typeFilter.value || product.productType === typeFilter.value;
     return matchesKeyword && matchesGroup && matchesType;
@@ -56,36 +64,105 @@ const visibleTotal = computed(() => filteredProducts.value.reduce((sum, item) =>
 const productCount = computed(() => filteredProducts.value.length);
 const groupCount = computed(() => groupOptions.value.length);
 const typeCount = computed(() => typeOptions.value.length);
+const featuredProducts = computed(() => filteredProducts.value.slice(0, 3));
+const checkoutFlow = computed(() => [
+  {
+    title: pickLabel(localeStore.locale, "1. 选择商品", "1. Choose Product"),
+    description: pickLabel(localeStore.locale, "先从货架挑选合适的商品。", "Choose the right product from the shelf first.")
+  },
+  {
+    title: pickLabel(localeStore.locale, "2. 配置规格", "2. Configure"),
+    description: pickLabel(localeStore.locale, "设置周期、规格和可选配置项。", "Set cycle, specs, and optional configuration.")
+  },
+  {
+    title: pickLabel(localeStore.locale, "3. 生成订单", "3. Create Order"),
+    description: pickLabel(localeStore.locale, "系统会先生成订单和账单。", "The system creates an order and invoice first.")
+  },
+  {
+    title: pickLabel(localeStore.locale, "4. 完成支付", "4. Complete Payment"),
+    description: pickLabel(localeStore.locale, "转入账单中心支付并继续追踪。", "Continue to invoices for payment and follow-up.")
+  }
+]);
+const activeSelections = computed(() => {
+  if (!activeProduct.value) return [];
+  return activeProduct.value.configOptions.map(option => {
+    const selectedValue = selectedOptions[activeProduct.value!.id]?.[option.code] ?? option.defaultValue;
+    const choice = option.choices.find(item => item.value === selectedValue);
+    return {
+      name: option.name,
+      value: choice?.label || selectedValue || "-",
+      priceDelta: choice?.priceDelta ?? 0
+    };
+  });
+});
+const activeProductMetrics = computed(() => {
+  if (!activeProduct.value) {
+    return [];
+  }
+  const product = activeProduct.value;
+  const cycle = selectedCyclePrice(product);
+  return [
+    {
+      label: pickLabel(localeStore.locale, "默认周期", "Default Cycle"),
+      value: formatPortalBillingCycle(localeStore.locale, cycle?.cycleCode)
+    },
+    {
+      label: pickLabel(localeStore.locale, "可选配置项", "Config Items"),
+      value: String(product.configOptions.length)
+    },
+    {
+      label: pickLabel(localeStore.locale, "可选计费周期", "Billing Options"),
+      value: String(product.pricing.length)
+    },
+    {
+      label: pickLabel(localeStore.locale, "必填配置项", "Required Items"),
+      value: String(product.configOptions.filter(item => item.required).length)
+    },
+    {
+      label: pickLabel(localeStore.locale, "当前总价", "Current Total"),
+      value: formatPortalMoney(localeStore.locale, productTotal(product))
+    }
+  ];
+});
 
 const copy = computed(() => ({
   title: pickLabel(localeStore.locale, "云产品商城", "Marketplace"),
   subtitle: pickLabel(
     localeStore.locale,
-    "按配置项自定义下单，价格会实时汇总并进入账单流程。",
-    "Customize products with configuration options and check out with live pricing."
+    "按周期和配置项自助下单，价格实时汇总后进入订单与账单链路。",
+    "Customize products with billing cycles and options, then check out with live pricing."
   ),
   guidance: pickLabel(
     localeStore.locale,
-    "商城只展示当前客户可订购的商品。选好周期和配置后，系统会先生成订单与账单，再进入支付流程。",
-    "Only products currently available to this client are listed here. After choosing a cycle and configuration, the system creates an order and invoice before payment."
+    "商城仅展示当前客户可订购的商品。确认配置后，系统会先生成订单和账单，再进入支付流程。",
+    "Only products available to this client are listed. The system creates an order and invoice before payment."
   ),
   availableProducts: pickLabel(localeStore.locale, "在售商品", "Available Products"),
   currentTotal: pickLabel(localeStore.locale, "当前选中总价", "Current Total"),
   groupCount: pickLabel(localeStore.locale, "商品分组", "Groups"),
   typeCount: pickLabel(localeStore.locale, "商品类型", "Types"),
+  groupOverview: pickLabel(localeStore.locale, "分组总览", "Group Overview"),
+  groupOverviewDesc: pickLabel(localeStore.locale, "快速切换商品分组，定位当前要下单的产品线。", "Jump between product groups to find the line you want to order."),
+  featured: pickLabel(localeStore.locale, "推荐商品", "Featured Products"),
+  featuredDesc: pickLabel(localeStore.locale, "先浏览推荐商品，再进入右侧下单面板完成配置。", "Browse featured products first, then complete configuration on the right."),
+  flowTitle: pickLabel(localeStore.locale, "下单流程", "Checkout Flow"),
+  flowDesc: pickLabel(localeStore.locale, "把商品选择、订单生成和账单支付串成一条清晰链路。", "Connect product selection, order creation, and invoice payment into one clear flow."),
+  currentPlan: pickLabel(localeStore.locale, "当前下单总览", "Current Plan"),
+  currentSelections: pickLabel(localeStore.locale, "当前选择", "Selected Options"),
+  currentSelectionsDesc: pickLabel(localeStore.locale, "实时查看配置项、规格和价格增量。", "Review chosen options, specs, and price delta in real time."),
   keywordPlaceholder: pickLabel(localeStore.locale, "搜索商品编号、商品名称或分组", "Search product no., name, or group"),
   groupPlaceholder: pickLabel(localeStore.locale, "商品分组", "Group"),
   typePlaceholder: pickLabel(localeStore.locale, "商品类型", "Type"),
   visible: pickLabel(localeStore.locale, "当前显示", "Visible"),
   reset: pickLabel(localeStore.locale, "重置筛选", "Reset"),
   shelfTitle: pickLabel(localeStore.locale, "商品货架", "Product Shelf"),
-  shelfDesc: pickLabel(localeStore.locale, "先选择商品，再在右侧完成周期和配置项。", "Choose a product first, then finish cycle and options on the right."),
+  shelfDesc: pickLabel(localeStore.locale, "先选择商品，再在右侧完成周期和配置。", "Choose a product first, then finish cycle and options on the right."),
   detailTitle: pickLabel(localeStore.locale, "下单面板", "Checkout Panel"),
   detailDesc: pickLabel(localeStore.locale, "支持按周期、配置项和价格差异实时汇总。", "Live pricing updates for cycle and configuration changes."),
   purchaseCycle: pickLabel(localeStore.locale, "购买周期", "Billing Cycle"),
   configOptions: pickLabel(localeStore.locale, "配置项", "Configuration"),
   required: pickLabel(localeStore.locale, "必填", "Required"),
-  optionHint: pickLabel(localeStore.locale, "按所选规格自动调整订单金额。", "Price updates automatically based on selected configuration."),
+  optionHint: pickLabel(localeStore.locale, "价格会随着所选规格自动调整。", "Price updates automatically based on selected configuration."),
   basePrice: pickLabel(localeStore.locale, "基础售价", "Base Price"),
   setupFee: pickLabel(localeStore.locale, "开通费用", "Setup Fee"),
   optionDelta: pickLabel(localeStore.locale, "配置增量", "Configuration Delta"),
@@ -99,7 +176,8 @@ const copy = computed(() => ({
   empty: pickLabel(localeStore.locale, "暂无匹配商品。", "No matching products."),
   noProduct: pickLabel(localeStore.locale, "当前没有可下单商品。", "No products available."),
   productNo: pickLabel(localeStore.locale, "商品编号", "Product No."),
-  productType: pickLabel(localeStore.locale, "商品类型", "Product Type")
+  productType: pickLabel(localeStore.locale, "商品类型", "Product Type"),
+  checkoutFailed: pickLabel(localeStore.locale, "下单失败", "Checkout failed")
 }));
 
 function ensureSelections(product: PortalProduct) {
@@ -214,9 +292,9 @@ async function handleCheckout(product: PortalProduct) {
         `Order ${result.order.orderNo} and invoice ${result.invoice.invoiceNo} created successfully.`
       )
     );
-    router.push({ path: "/invoices", query: { invoiceNo: result.invoice.invoiceNo } });
+    void router.push({ path: "/invoices", query: { invoiceNo: result.invoice.invoiceNo } });
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : pickLabel(localeStore.locale, "下单失败", "Checkout failed"));
+    ElMessage.error(err instanceof Error ? err.message : copy.value.checkoutFailed);
   } finally {
     submittingId.value = null;
   }
@@ -257,6 +335,99 @@ onMounted(fetchProducts);
           <strong>{{ typeCount }}</strong>
         </div>
       </div>
+    </section>
+
+    <section class="portal-grid portal-grid--two">
+      <article class="portal-card">
+        <div class="portal-card-head">
+          <div>
+            <h2 class="portal-panel__title">{{ copy.groupOverview }}</h2>
+            <div class="portal-panel__meta">{{ copy.groupOverviewDesc }}</div>
+          </div>
+        </div>
+        <div class="portal-actions-grid" style="margin-top: 18px">
+          <button
+            v-for="item in groupSummary"
+            :key="item.name"
+            type="button"
+            class="portal-action-card"
+            @click="groupFilter = item.name"
+          >
+            <strong>{{ item.name }}</strong>
+            <span>{{ item.count }} {{ pickLabel(localeStore.locale, "个商品", "products") }}</span>
+          </button>
+        </div>
+      </article>
+
+      <article class="portal-card">
+        <div class="portal-card-head">
+          <div>
+            <h2 class="portal-panel__title">{{ copy.featured }}</h2>
+            <div class="portal-panel__meta">{{ copy.featuredDesc }}</div>
+          </div>
+        </div>
+        <div v-if="featuredProducts.length" class="portal-actions-grid" style="margin-top: 18px">
+          <button
+            v-for="product in featuredProducts"
+            :key="product.id"
+            type="button"
+            class="portal-action-card"
+            @click="focusProduct(product)"
+          >
+            <strong>{{ product.name }}</strong>
+            <span>{{ product.groupName }} / {{ formatPortalProductType(localeStore.locale, product.productType) }}</span>
+          </button>
+        </div>
+        <div v-else class="portal-empty-state" style="margin-top: 18px">{{ copy.empty }}</div>
+      </article>
+
+      <article class="portal-card">
+        <div class="portal-card-head">
+          <div>
+            <h2 class="portal-panel__title">{{ copy.currentPlan }}</h2>
+          </div>
+        </div>
+        <div class="portal-hero-grid" style="margin-top: 18px">
+          <div v-for="item in activeProductMetrics" :key="item.label" class="portal-mini-card">
+            <span class="portal-mini-card__label">{{ item.label }}</span>
+            <strong class="portal-mini-card__value">{{ item.value }}</strong>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="portal-card">
+      <div class="portal-card-head">
+        <div>
+          <h2 class="portal-panel__title">{{ copy.flowTitle }}</h2>
+          <div class="portal-panel__meta">{{ copy.flowDesc }}</div>
+        </div>
+      </div>
+      <div class="portal-actions-grid" style="margin-top: 18px">
+        <button v-for="item in checkoutFlow" :key="item.title" type="button" class="portal-action-card">
+          <strong>{{ item.title }}</strong>
+          <span>{{ item.description }}</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="portal-card">
+      <div class="portal-card-head">
+        <div>
+          <h2 class="portal-panel__title">{{ copy.currentSelections }}</h2>
+          <div class="portal-panel__meta">{{ copy.currentSelectionsDesc }}</div>
+        </div>
+      </div>
+      <div v-if="activeSelections.length" class="portal-list" style="margin-top: 18px">
+        <div v-for="item in activeSelections" :key="item.name" class="portal-list-item">
+          <div class="portal-list-item__meta">
+            <div class="portal-list-item__title">{{ item.name }}</div>
+            <div class="portal-list-item__desc">{{ item.value }}</div>
+          </div>
+          <strong>{{ item.priceDelta ? `+${formatPortalMoney(localeStore.locale, item.priceDelta)}` : formatPortalMoney(localeStore.locale, 0) }}</strong>
+        </div>
+      </div>
+      <div v-else class="portal-empty-state" style="margin-top: 18px">{{ copy.noProduct }}</div>
     </section>
 
     <section class="portal-card">
@@ -320,7 +491,7 @@ onMounted(fetchProducts);
         <div v-else class="portal-empty-state">{{ copy.empty }}</div>
       </article>
 
-      <article class="portal-card">
+      <article class="portal-card store-grid__panel">
         <div class="portal-card-head">
           <div>
             <h2 class="portal-panel__title">{{ copy.detailTitle }}</h2>
@@ -445,6 +616,12 @@ onMounted(fetchProducts);
   gap: 20px;
 }
 
+.store-grid__panel {
+  position: sticky;
+  top: 104px;
+  align-self: start;
+}
+
 .store-shelf {
   display: grid;
   gap: 14px;
@@ -504,6 +681,10 @@ onMounted(fetchProducts);
 @media (max-width: 1200px) {
   .store-grid {
     grid-template-columns: 1fr;
+  }
+
+  .store-grid__panel {
+    position: static;
   }
 }
 </style>

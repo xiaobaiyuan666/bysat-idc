@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import {
@@ -19,6 +20,7 @@ type AdminMember = {
   roles: string[];
 };
 
+const router = useRouter();
 const loading = ref(false);
 const saving = ref(false);
 const departments = ref<TicketDepartment[]>([]);
@@ -29,16 +31,39 @@ const summaryCards = computed(() => {
   const summary = statistics.value?.summary;
   if (!summary) return [];
   return [
-    { title: "\u5de5\u5355\u603b\u6570", value: summary.total, hint: "\u5f53\u524d\u7cfb\u7edf\u5185\u5168\u90e8\u5de5\u5355" },
+    { title: "工单总数", value: summary.total, hint: "当前系统内全部工单", query: {} as Record<string, string> },
     {
-      title: "\u5f85\u5ba2\u6237\u56de\u590d",
+      title: "待客户回复",
       value: summary.waitingCustomer,
-      hint: "\u5df2\u8fdb\u5165\u5ba2\u6237\u56de\u590d\u7b49\u5f85\u9636\u6bb5\u7684\u5de5\u5355"
+      hint: "已进入客户回复等待阶段的工单",
+      query: { status: "WAITING_CUSTOMER" } as Record<string, string>
     },
-    { title: "\u8d85\u65f6\u5de5\u5355", value: summary.breached, hint: "SLA \u5df2\u7ecf\u8d85\u65f6\u7684\u5de5\u5355" },
-    { title: "\u672a\u5206\u914d", value: summary.unassigned, hint: "\u8fd8\u6ca1\u6709\u88ab\u5ba2\u670d\u63a5\u5355\u7684\u5de5\u5355" },
-    { title: "\u5df2\u5173\u95ed", value: summary.closed, hint: "\u5df2\u5b8c\u6210\u6216\u5df2\u5173\u95ed\u7684\u5de5\u5355" }
+    {
+      title: "超时工单",
+      value: summary.breached,
+      hint: "SLA 已经超时的工单，需要优先跟进",
+      query: { priority: "URGENT" } as Record<string, string>
+    },
+    {
+      title: "未分配",
+      value: summary.unassigned,
+      hint: "还没有被客服接单的工单",
+      query: { status: "OPEN" } as Record<string, string>
+    },
+    {
+      title: "已关闭",
+      value: summary.closed,
+      hint: "已完成或已关闭的工单",
+      query: { status: "CLOSED" } as Record<string, string>
+    }
   ];
+});
+
+const enabledDepartmentCount = computed(() => departments.value.filter(item => item.enabled).length);
+const boundAdminCount = computed(() => {
+  const ids = new Set<number>();
+  departments.value.forEach(item => item.adminIds.forEach(id => ids.add(id)));
+  return ids.size;
 });
 
 async function loadData() {
@@ -54,7 +79,7 @@ async function loadData() {
       adminIds: [...(item.adminIds || [])]
     }));
     statistics.value = stats;
-    admins.value = adminItems;
+    admins.value = adminItems.filter(item => item.status === "ACTIVE");
   } finally {
     loading.value = false;
   }
@@ -89,18 +114,57 @@ function setDefault(index: number) {
   });
 }
 
+function openTicketList(query: Record<string, string>) {
+  void router.push({
+    path: "/tickets/list",
+    query
+  });
+}
+
+function openDepartmentTickets(name: string, status?: string) {
+  const query: Record<string, string> = {
+    departmentName: name
+  };
+  if (status) query.status = status;
+  openTicketList(query);
+}
+
+function openAdminTickets(adminId: number, status?: string) {
+  const query: Record<string, string> = {
+    assignedAdminId: String(adminId)
+  };
+  if (status) query.status = status;
+  openTicketList(query);
+}
+
 async function saveDepartments() {
+  const normalized = departments.value.map(item => ({
+    ...item,
+    name: item.name.trim(),
+    description: item.description.trim()
+  }));
+
+  if (normalized.some(item => !item.name)) {
+    ElMessage.warning("请先补全所有工单部门名称");
+    return;
+  }
+
+  if (!normalized.some(item => item.enabled && item.isDefault)) {
+    ElMessage.warning("请至少保留一个启用中的默认部门");
+    return;
+  }
+
   saving.value = true;
   try {
-    const result = await updateTicketDepartments(departments.value);
+    const result = await updateTicketDepartments(normalized);
     departments.value = result.items.map(item => ({
       ...item,
       adminIds: [...(item.adminIds || [])]
     }));
-    ElMessage.success("\u5de5\u5355\u90e8\u95e8\u914d\u7f6e\u5df2\u4fdd\u5b58");
+    ElMessage.success("工单部门配置已保存");
     statistics.value = await fetchTicketStatistics();
   } catch (error: any) {
-    ElMessage.error(error?.message ?? "\u5de5\u5355\u90e8\u95e8\u914d\u7f6e\u4fdd\u5b58\u5931\u8d25");
+    ElMessage.error(error?.message ?? "工单部门配置保存失败");
   } finally {
     saving.value = false;
   }
@@ -113,11 +177,12 @@ onMounted(() => {
 
 <template>
   <PageWorkbench
-    eyebrow="财务 / 工单"
+    eyebrow="工单"
     title="工单配置"
-    subtitle="先把部门、默认归类和负责管理员做成后台可编辑配置，再配合工单中心和工单工作台完成接单、转派和规则约束。"
+    subtitle="把部门、默认归类和负责人维护做成后台可操作配置，再直接联到工单中心做接单、转派和积压排查。"
   >
     <template #actions>
+      <el-button @click="openTicketList({})">工单中心</el-button>
       <el-button :loading="loading" @click="loadData">刷新</el-button>
       <el-button @click="addDepartment">新增部门</el-button>
       <el-button type="primary" :loading="saving" @click="saveDepartments">保存配置</el-button>
@@ -125,10 +190,26 @@ onMounted(() => {
 
     <template #metrics>
       <div class="summary-grid">
-        <div v-for="card in summaryCards" :key="card.title" class="summary-card">
+        <button
+          v-for="card in summaryCards"
+          :key="card.title"
+          type="button"
+          class="summary-card summary-card--button"
+          @click="openTicketList(card.query)"
+        >
           <span>{{ card.title }}</span>
           <strong>{{ card.value }}</strong>
           <p>{{ card.hint }}</p>
+        </button>
+        <div class="summary-card">
+          <span>启用部门</span>
+          <strong>{{ enabledDepartmentCount }}</strong>
+          <p>当前可用于客户提单、客服筛单和自动分流的部门数量。</p>
+        </div>
+        <div class="summary-card">
+          <span>参与客服</span>
+          <strong>{{ boundAdminCount }}</strong>
+          <p>当前已绑定到工单部门、可参与接单处理的管理员数量。</p>
         </div>
       </div>
     </template>
@@ -139,7 +220,7 @@ onMounted(() => {
           <div>
             <h2 class="section-title">工单部门</h2>
             <p class="page-subtitle">
-              部门会用于后台筛单、客户前台提单归类、负责人约束和后续自动化规则。这里先把最核心的部门档案和负责人绑定做实。
+              部门用于后台筛单、客户前台提单归类、负责人约束和后续自动化规则。这里先把最核心的部门档案和负责人绑定做实。
             </p>
           </div>
         </div>
@@ -152,12 +233,12 @@ onMounted(() => {
           </el-table-column>
           <el-table-column label="部门名称" min-width="180">
             <template #default="{ row }">
-              <el-input v-model="row.name" placeholder="例如：Technical Support" />
+              <el-input v-model="row.name" placeholder="例如：技术支持" />
             </template>
           </el-table-column>
           <el-table-column label="说明" min-width="240">
             <template #default="{ row }">
-              <el-input v-model="row.description" placeholder="说明这个部门主要处理哪些问题" />
+              <el-input v-model="row.description" placeholder="说明该部门主要处理哪些问题" />
             </template>
           </el-table-column>
           <el-table-column label="负责管理员" min-width="260">
@@ -184,9 +265,10 @@ onMounted(() => {
               </el-button>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="90" fixed="right">
-            <template #default="{ $index }">
-              <el-button type="danger" link @click="removeDepartment($index)">删除</el-button>
+          <el-table-column label="操作" min-width="160" fixed="right">
+            <template #default="{ row, $index }">
+              <el-button link type="primary" @click="openDepartmentTickets(row.name)">查看工单</el-button>
+              <el-button link type="danger" @click="removeDepartment($index)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -197,18 +279,30 @@ onMounted(() => {
           <div class="page-header">
             <div>
               <h2 class="section-title">部门负载</h2>
-              <p class="page-subtitle">按部门查看当前工单量、处理状态和超时情况。</p>
+              <p class="page-subtitle">按部门查看当前工单量、处理状态和超时情况，便于部门排班与转派。</p>
             </div>
           </div>
 
           <el-table :data="statistics?.departmentStats || []" border stripe empty-text="暂无统计数据">
-            <el-table-column prop="name" label="部门" min-width="150" />
+            <el-table-column prop="name" label="部门" min-width="150">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openDepartmentTickets(row.name)">{{ row.name }}</el-button>
+              </template>
+            </el-table-column>
             <el-table-column prop="total" label="总数" width="90" />
             <el-table-column prop="open" label="待处理" width="90" />
             <el-table-column prop="processing" label="处理中" width="90" />
             <el-table-column prop="waitingCustomer" label="待客户回复" width="120" />
             <el-table-column prop="breached" label="超时" width="90" />
             <el-table-column prop="closed" label="已关闭" width="90" />
+            <el-table-column label="操作" min-width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openDepartmentTickets(row.name, 'OPEN')">待处理</el-button>
+                <el-button link type="primary" @click="openDepartmentTickets(row.name, 'WAITING_CUSTOMER')">
+                  待客户回复
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </div>
 
@@ -216,18 +310,28 @@ onMounted(() => {
           <div class="page-header">
             <div>
               <h2 class="section-title">客服负载</h2>
-              <p class="page-subtitle">按负责人查看接单量和当前积压情况，便于接单与转派。</p>
+              <p class="page-subtitle">按负责人查看接单量和当前积压情况，便于接单、转派和班次协调。</p>
             </div>
           </div>
 
           <el-table :data="statistics?.adminStats || []" border stripe empty-text="暂无统计数据">
-            <el-table-column prop="adminName" label="负责人" min-width="150" />
+            <el-table-column prop="adminName" label="负责人" min-width="150">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openAdminTickets(row.adminId)">{{ row.adminName }}</el-button>
+              </template>
+            </el-table-column>
             <el-table-column prop="total" label="总数" width="90" />
             <el-table-column prop="open" label="待处理" width="90" />
             <el-table-column prop="processing" label="处理中" width="90" />
             <el-table-column prop="waitingCustomer" label="待客户回复" width="120" />
             <el-table-column prop="breached" label="超时" width="90" />
             <el-table-column prop="closed" label="已关闭" width="90" />
+            <el-table-column label="操作" min-width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openAdminTickets(row.adminId, 'OPEN')">待处理</el-button>
+                <el-button link type="primary" @click="openAdminTickets(row.adminId, 'PROCESSING')">处理中</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </div>
       </div>
@@ -244,7 +348,7 @@ onMounted(() => {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -254,6 +358,11 @@ onMounted(() => {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 252, 0.98));
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: 0 14px 40px rgba(15, 23, 42, 0.06);
+}
+
+.summary-card--button {
+  cursor: pointer;
+  text-align: left;
 }
 
 .summary-card span {
@@ -280,6 +389,12 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+}
+
+@media (max-width: 1440px) {
+  .summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 1280px) {

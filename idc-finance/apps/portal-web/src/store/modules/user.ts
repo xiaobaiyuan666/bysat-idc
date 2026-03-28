@@ -10,11 +10,27 @@ export const useUserStore = defineStore("user", {
   },
   actions: {
     async login(payload: { username: string; password: string }) {
-      if (payload.username !== "portal" || payload.password !== "Portal123!") {
+      const response = await fetch("/api/v1/portal/auth/login/", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
         throw new Error("invalid credentials");
       }
-      this.token = "phase1-portal-token";
-      this.displayName = "演示客户";
+
+      const payloadJson = (await response.json()) as {
+        data?: {
+          token?: string;
+          displayName?: string;
+        };
+      };
+      this.token = payloadJson.data?.token ?? "";
+      this.displayName = payloadJson.data?.displayName ?? "演示客户";
       localStorage.setItem("portal-token", this.token);
       localStorage.setItem("portal-display-name", this.displayName);
     },

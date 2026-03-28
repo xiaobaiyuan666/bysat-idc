@@ -224,22 +224,93 @@ func (service *Service) CreateOrderRequest(
 		RequestID:   requestID,
 		Description: "后台创建订单申请，进入后续审批或跟进流程",
 		Payload: map[string]any{
-			"requestNo":              created.RequestNo,
-			"type":                   created.Type,
-			"summary":                created.Summary,
-			"reason":                 created.Reason,
-			"currentAmount":          created.CurrentAmount,
-			"requestedAmount":        created.RequestedAmount,
-			"currentBillingCycle":    created.CurrentBillingCycle,
-			"requestedBillingCycle":  created.RequestedBillingCycle,
-			"status":                 created.Status,
-			"sourceType":             created.SourceType,
-			"sourceName":             created.SourceName,
+			"requestNo":             created.RequestNo,
+			"type":                  created.Type,
+			"summary":               created.Summary,
+			"reason":                created.Reason,
+			"currentAmount":         created.CurrentAmount,
+			"requestedAmount":       created.RequestedAmount,
+			"currentBillingCycle":   created.CurrentBillingCycle,
+			"requestedBillingCycle": created.RequestedBillingCycle,
+			"status":                created.Status,
+			"sourceType":            created.SourceType,
+			"sourceName":            created.SourceName,
 		},
 	})
 
 	detail, ok := service.GetOrderDetail(orderID)
 	return detail, ok, nil
+}
+
+func (service *Service) CreatePortalOrderRequest(
+	customerID int64,
+	customerName string,
+	orderID int64,
+	request dto.CreateOrderRequestRequest,
+	requestID string,
+) (dto.OrderDetailResponse, bool, error) {
+	order, exists := service.repository.GetOrderByID(orderID)
+	if !exists || order.CustomerID != customerID {
+		return dto.OrderDetailResponse{}, false, nil
+	}
+
+	requestType := normalizeOrderRequestType(request.Type)
+	if requestType == "" {
+		return dto.OrderDetailResponse{}, false, fmt.Errorf("订单申请类型不正确")
+	}
+	if request.RequestedAmount != nil && *request.RequestedAmount < 0 {
+		return dto.OrderDetailResponse{}, false, fmt.Errorf("申请金额不能小于 0")
+	}
+	reason := strings.TrimSpace(request.Reason)
+	if reason == "" {
+		return dto.OrderDetailResponse{}, false, fmt.Errorf("申请原因不能为空")
+	}
+
+	summary := strings.TrimSpace(request.Summary)
+	if summary == "" {
+		summary = defaultOrderRequestSummary(requestType, order.ProductName)
+	}
+
+	created, ok, err := service.repository.CreateOrderRequest(orderID, domain.OrderRequestCreateInput{
+		Type:                  requestType,
+		Summary:               summary,
+		Reason:                reason,
+		RequestedAmount:       request.RequestedAmount,
+		RequestedBillingCycle: strings.TrimSpace(request.RequestedBillingCycle),
+		SourceType:            "CUSTOMER",
+		SourceID:              customerID,
+		SourceName:            customerName,
+		Payload:               request.Payload,
+	})
+	if err != nil {
+		return dto.OrderDetailResponse{}, false, err
+	}
+	if !ok {
+		return dto.OrderDetailResponse{}, false, nil
+	}
+
+	service.audit.Record(audit.Entry{
+		ActorType:   "CUSTOMER",
+		ActorID:     customerID,
+		Actor:       customerName,
+		Action:      "order.request.portal_create",
+		TargetType:  "order",
+		TargetID:    order.ID,
+		Target:      order.OrderNo,
+		RequestID:   requestID,
+		Description: "客户在门户提交订单申请",
+		Payload: map[string]any{
+			"requestNo":             created.RequestNo,
+			"type":                  created.Type,
+			"summary":               created.Summary,
+			"reason":                created.Reason,
+			"requestedAmount":       created.RequestedAmount,
+			"requestedBillingCycle": created.RequestedBillingCycle,
+		},
+	})
+
+	detail, detailOK := service.GetOrderDetail(orderID)
+	return detail, detailOK, nil
 }
 
 func (service *Service) ProcessOrderRequest(
@@ -279,12 +350,12 @@ func (service *Service) ProcessOrderRequest(
 		RequestID:   requestTraceID,
 		Description: "后台处理订单申请，并记录审批结果",
 		Payload: map[string]any{
-			"requestNo":    updated.RequestNo,
-			"type":         updated.Type,
-			"status":       updated.Status,
-			"processNote":  updated.ProcessNote,
+			"requestNo":     updated.RequestNo,
+			"type":          updated.Type,
+			"status":        updated.Status,
+			"processNote":   updated.ProcessNote,
 			"processorName": updated.ProcessorName,
-			"processedAt":  updated.ProcessedAt,
+			"processedAt":   updated.ProcessedAt,
 		},
 	})
 

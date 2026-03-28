@@ -60,22 +60,12 @@ export interface CustomerIdentityOverview extends IdentityRecord {
 }
 
 export interface RelatedItem {
-  id?: number;
-  serviceId?: number;
-  invoiceId?: number;
-  ticketId?: number;
   no?: string;
   name?: string;
   status?: string;
   amount?: string;
   dueAt?: string;
   updatedAt?: string;
-  billingCycle?: string;
-  providerType?: string;
-  providerResourceId?: string;
-  regionName?: string;
-  ipAddress?: string;
-  description?: string;
   serviceNo?: string;
   productName?: string;
   nextDueAt?: string;
@@ -789,17 +779,6 @@ export interface MofangInstanceSummary {
   raw?: Record<string, unknown>;
 }
 
-export interface MofangInstanceDetail extends MofangInstanceSummary {}
-
-export interface MofangInstanceActionResponse {
-  ok: boolean;
-  action: string;
-  remoteId: string;
-  status: string;
-  message: string;
-  response?: Record<string, unknown>;
-}
-
 export interface MofangSyncItem {
   remoteId: string;
   serviceId?: number;
@@ -841,6 +820,8 @@ export interface MofangSyncLogItem {
   resourceType: string;
   resourceId: string;
   serviceId?: number;
+  orderId?: number;
+  invoiceId?: number;
   status: string;
   message: string;
   createdAt: string;
@@ -1725,37 +1706,6 @@ export async function fetchMofangInstances(accountId?: number | string) {
   return data.data as { items: MofangInstanceSummary[]; total: number };
 }
 
-export async function fetchMofangInstanceDetail(id: number | string, accountId?: number | string) {
-  const query = accountId !== undefined ? `?accountId=${encodeURIComponent(String(accountId))}` : "";
-  const { data } = await http.get(`/providers/mofang/instances/${id}${query}`);
-  return data.data as MofangInstanceDetail;
-}
-
-export async function runMofangInstanceAction(
-  id: number | string,
-  action:
-    | "suspend"
-    | "power-on"
-    | "power-off"
-    | "reboot"
-    | "hard-reboot"
-    | "hard-power-off"
-    | "reset-password"
-    | "reinstall"
-    | "unsuspend"
-    | "get-vnc"
-    | "rescue-start"
-    | "rescue-stop"
-    | "lock"
-    | "unlock",
-  payload?: { imageName?: string; password?: string },
-  accountId?: number | string
-) {
-  const query = accountId !== undefined ? `?accountId=${encodeURIComponent(String(accountId))}` : "";
-  const { data } = await http.post(`/providers/mofang/instances/${id}/actions/${action}${query}`, payload ?? {});
-  return data.data as MofangInstanceActionResponse;
-}
-
 export async function pullMofangSync(payload?: {
   providerAccountId?: number;
   limit?: number;
@@ -1898,6 +1848,50 @@ export async function updateRole(id: number | string, payload: SaveRoleRequest) 
 export async function fetchAuditLogs() {
   const { data } = await http.get("/audit-logs");
   return data.data as AuditLog[];
+}
+
+export interface PluginField {
+  key: string;
+  label: string;
+  required: boolean;
+  placeholder?: string;
+  secret: boolean;
+}
+
+export interface PluginDefinition {
+  code: string;
+  name: string;
+  description: string;
+  fields: PluginField[];
+}
+
+export interface PluginConfig {
+  code: string;
+  name: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export async function fetchPluginDefinitions() {
+  const { data } = await http.get("/plugins/definitions");
+  return data.data as { items: PluginDefinition[]; total: number };
+}
+
+export async function fetchPluginConfigs() {
+  const { data } = await http.get("/plugins/configs");
+  return data.data as { items: PluginConfig[]; total: number };
+}
+
+export async function fetchPluginConfig(code: string) {
+  const { data } = await http.get(`/plugins/${encodeURIComponent(code)}/config`);
+  return data.data as PluginConfig;
+}
+
+export async function savePluginConfig(code: string, payload: { enabled: boolean; config: Record<string, unknown> }) {
+  const { data } = await http.put(`/plugins/${encodeURIComponent(code)}/config`, payload);
+  return data.data as PluginConfig;
 }
 
 export async function fetchWorkbenchOverview() {

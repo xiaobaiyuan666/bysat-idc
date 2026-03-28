@@ -45,6 +45,26 @@ type RemoteCatalogOption = {
   label: string;
 };
 
+type ProductTemplatePackage = {
+  version: number;
+  scope: "product-template-package";
+  exportedAt: string;
+  source: {
+    productId: number;
+    productNo: string;
+    name: string;
+  };
+  template: {
+    productType: string;
+    description: string;
+    pricing: ProductPriceOption[];
+    configOptions: ProductConfigOption[];
+    resourceTemplate: Product["resourceTemplate"];
+    automationConfig: Product["automationConfig"];
+    upstreamMapping: Product["upstreamMapping"];
+  };
+};
+
 const t = {
   eyebrow: "\u5546\u54c1\u8bbe\u7f6e",
   title: "\u5546\u54c1\u5de5\u4f5c\u53f0",
@@ -83,6 +103,19 @@ const upstreamGroups = ref<UpstreamCatalogGroup[]>([]);
 const remoteTemplate = ref<UpstreamProductTemplate | null>(null);
 const activeTab = ref("basic");
 const showAdvancedAutomation = ref(false);
+const pricingImportInputRef = ref<HTMLInputElement | null>(null);
+const configImportInputRef = ref<HTMLInputElement | null>(null);
+const templatePackageImportInputRef = ref<HTMLInputElement | null>(null);
+const templateCreateVisible = ref(false);
+const creatingFromTemplate = ref(false);
+const templateCreateForm = ref({
+  name: "",
+  groupName: "",
+  status: "ACTIVE",
+  inheritAutomation: true,
+  inheritUpstreamMapping: false,
+  descriptionAppend: ""
+});
 
 const automationPresets = [
   {
@@ -286,6 +319,22 @@ const commonPricingPresets = [
   { cycleCode: "onetime", cycleName: "一次性" }
 ] as const;
 
+const commonCycleNameMap = new Map<string, string>(commonPricingPresets.map(item => [item.cycleCode, item.cycleName]));
+
+function downloadJson(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json;charset=utf-8;"
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function cloneProduct(input: Product): ProductDetailForm {
   return {
     id: input.id,
@@ -319,6 +368,36 @@ function buildProductPayload(source: ProductDetailForm, overrides: Record<string
     automationConfig: { ...source.automationConfig },
     upstreamMapping: { ...source.upstreamMapping },
     ...overrides
+  };
+}
+
+function buildEmptyAutomationConfig(source: ProductDetailForm["automationConfig"]) {
+  return {
+    ...source,
+    providerAccountId: 0,
+    channel: "LOCAL",
+    moduleType: "NORMAL",
+    provisionStage: "MANUAL_REVIEW",
+    autoProvision: false,
+    serverGroup: "",
+    providerNode: ""
+  };
+}
+
+function buildEmptyUpstreamMapping(source: ProductDetailForm["upstreamMapping"]) {
+  return {
+    ...source,
+    providerAccountId: 0,
+    providerType: "NONE",
+    sourceName: "",
+    remoteProductCode: "",
+    remoteProductName: "",
+    autoSyncPricing: false,
+    autoSyncConfig: false,
+    autoSyncTemplate: false,
+    syncStatus: "NONE",
+    syncMessage: "",
+    lastSyncedAt: ""
   };
 }
 
@@ -454,6 +533,260 @@ function applyRemoteAll() {
   ElMessage.success("已将上游价格、配置项和云模板全部回填到本地草稿");
 }
 
+function exportPricingDraft() {
+  if (!product.value) return;
+  downloadJson(`${product.value.productNo || "product"}-pricing-draft.json`, {
+    version: 1,
+    scope: "pricing",
+    productId: product.value.id,
+    productNo: product.value.productNo,
+    exportedAt: new Date().toISOString(),
+    pricing: product.value.pricing
+  });
+  ElMessage.success("价格矩阵草稿已导出");
+}
+
+function exportConfigDraft() {
+  if (!product.value) return;
+  downloadJson(`${product.value.productNo || "product"}-config-draft.json`, {
+    version: 1,
+    scope: "config",
+    productId: product.value.id,
+    productNo: product.value.productNo,
+    exportedAt: new Date().toISOString(),
+    configOptions: product.value.configOptions
+  });
+  ElMessage.success("配置项草稿已导出");
+}
+
+function exportTemplatePackage() {
+  if (!product.value) return;
+  const payload: ProductTemplatePackage = {
+    version: 1,
+    scope: "product-template-package",
+    exportedAt: new Date().toISOString(),
+    source: {
+      productId: product.value.id,
+      productNo: product.value.productNo,
+      name: product.value.name
+    },
+    template: {
+      productType: product.value.productType,
+      description: product.value.description,
+      pricing: product.value.pricing.map(item => ({ ...item })),
+      configOptions: cloneConfigOptions(product.value.configOptions),
+      resourceTemplate: { ...product.value.resourceTemplate },
+      automationConfig: { ...product.value.automationConfig },
+      upstreamMapping: { ...product.value.upstreamMapping }
+    }
+  };
+  downloadJson(`${product.value.productNo || "product"}-template-package.json`, payload);
+  ElMessage.success("商品标准模板包已导出");
+}
+
+function triggerPricingImport() {
+  pricingImportInputRef.value?.click();
+}
+
+function triggerConfigImport() {
+  configImportInputRef.value?.click();
+}
+
+function triggerTemplatePackageImport() {
+  templatePackageImportInputRef.value?.click();
+}
+
+async function readJsonFromInput(input: HTMLInputElement) {
+  const file = input.files?.[0];
+  if (!file) return null;
+  try {
+    return JSON.parse(await file.text());
+  } finally {
+    input.value = "";
+  }
+}
+
+async function handlePricingImport(event: Event) {
+  if (!product.value) return;
+  const input = event.target as HTMLInputElement;
+  try {
+    const raw = await readJsonFromInput(input);
+    if (!raw) return;
+    const items = Array.isArray(raw) ? raw : Array.isArray(raw.pricing) ? raw.pricing : null;
+    if (!items) throw new Error("价格草稿格式不正确，请导入 JSON 草稿文件");
+    product.value.pricing = items.map((item: any, index: number) => ({
+      cycleCode: String(item?.cycleCode || `custom-${index + 1}`),
+      cycleName: String(item?.cycleName || ""),
+      price: Number(item?.price || 0),
+      setupFee: Number(item?.setupFee || 0)
+    }));
+    normalizePricingRows(true);
+    ElMessage.success(`已导入 ${product.value.pricing.length} 个价格周期`);
+  } catch (error: any) {
+    ElMessage.error(error?.message ?? "价格草稿导入失败");
+  }
+}
+
+async function handleConfigImport(event: Event) {
+  if (!product.value) return;
+  const input = event.target as HTMLInputElement;
+  try {
+    const raw = await readJsonFromInput(input);
+    if (!raw) return;
+    const items = Array.isArray(raw) ? raw : Array.isArray(raw.configOptions) ? raw.configOptions : null;
+    if (!items) throw new Error("配置项草稿格式不正确，请导入 JSON 草稿文件");
+    product.value.configOptions = items.map((option: any, optionIndex: number) => ({
+      code: String(option?.code || `config_${optionIndex + 1}`),
+      name: String(option?.name || ""),
+      inputType: option?.inputType === "text" ? "text" : option?.inputType === "radio" ? "radio" : "select",
+      required: Boolean(option?.required),
+      defaultValue: String(option?.defaultValue || ""),
+      description: String(option?.description || ""),
+      choices: Array.isArray(option?.choices)
+        ? option.choices.map((choice: any, choiceIndex: number) => ({
+            value: String(choice?.value || `value_${choiceIndex + 1}`),
+            label: String(choice?.label || choice?.value || `选项 ${choiceIndex + 1}`),
+            priceDelta: Number(choice?.priceDelta || 0)
+          }))
+        : []
+    }));
+    normalizeConfigOptions(true);
+    ElMessage.success(`已导入 ${product.value.configOptions.length} 个配置项`);
+  } catch (error: any) {
+    ElMessage.error(error?.message ?? "配置项草稿导入失败");
+  }
+}
+
+async function handleTemplatePackageImport(event: Event) {
+  if (!product.value) return;
+  const input = event.target as HTMLInputElement;
+  try {
+    const raw = await readJsonFromInput(input);
+    if (!raw) return;
+    const template = raw?.scope === "product-template-package" ? raw.template : raw?.template || raw;
+    if (!template || typeof template !== "object") {
+      throw new Error("标准模板包格式不正确，请导入商品模板包 JSON");
+    }
+
+    if (Array.isArray(template.pricing)) {
+      product.value.pricing = template.pricing.map((item: any, index: number) => ({
+        cycleCode: String(item?.cycleCode || `custom-${index + 1}`),
+        cycleName: String(item?.cycleName || ""),
+        price: Number(item?.price || 0),
+        setupFee: Number(item?.setupFee || 0)
+      }));
+      normalizePricingRows(true);
+    }
+
+    if (Array.isArray(template.configOptions)) {
+      product.value.configOptions = template.configOptions.map((option: any, optionIndex: number) => ({
+        code: String(option?.code || `config_${optionIndex + 1}`),
+        name: String(option?.name || ""),
+        inputType: option?.inputType === "text" ? "text" : option?.inputType === "radio" ? "radio" : "select",
+        required: Boolean(option?.required),
+        defaultValue: String(option?.defaultValue || ""),
+        description: String(option?.description || ""),
+        choices: Array.isArray(option?.choices)
+          ? option.choices.map((choice: any, choiceIndex: number) => ({
+              value: String(choice?.value || `value_${choiceIndex + 1}`),
+              label: String(choice?.label || choice?.value || `选项 ${choiceIndex + 1}`),
+              priceDelta: Number(choice?.priceDelta || 0)
+            }))
+          : []
+      }));
+      normalizeConfigOptions(true);
+    }
+
+    if (template.productType) product.value.productType = String(template.productType);
+    if (typeof template.description === "string") product.value.description = template.description;
+    if (template.resourceTemplate && typeof template.resourceTemplate === "object") {
+      product.value.resourceTemplate = {
+        ...product.value.resourceTemplate,
+        ...template.resourceTemplate
+      };
+    }
+    if (template.automationConfig && typeof template.automationConfig === "object") {
+      product.value.automationConfig = {
+        ...product.value.automationConfig,
+        ...template.automationConfig
+      };
+    }
+    if (template.upstreamMapping && typeof template.upstreamMapping === "object") {
+      product.value.upstreamMapping = {
+        ...product.value.upstreamMapping,
+        ...template.upstreamMapping
+      };
+    }
+
+    if (product.value.upstreamMapping.providerType === "ZJMF_API" && product.value.upstreamMapping.providerAccountId) {
+      await loadUpstreamCatalog(product.value.upstreamMapping.providerAccountId);
+      await loadRemotePreview();
+    } else {
+      remoteTemplate.value = null;
+    }
+
+    ElMessage.success("标准模板包已导入，价格、配置项、云模板和自动化策略已更新");
+  } catch (error: any) {
+    ElMessage.error(error?.message ?? "标准模板包导入失败");
+  }
+}
+
+function openTemplateCreateDialog() {
+  if (!product.value) return;
+  templateCreateForm.value = {
+    name: `${product.value.name} - 新商品`,
+    groupName: product.value.groupName,
+    status: "ACTIVE",
+    inheritAutomation: true,
+    inheritUpstreamMapping: false,
+    descriptionAppend: `基于模板 ${product.value.productNo} 创建`
+  };
+  templateCreateVisible.value = true;
+}
+
+async function createProductFromTemplate() {
+  if (!product.value) return;
+  const name = templateCreateForm.value.name.trim();
+  const groupName = templateCreateForm.value.groupName.trim();
+  if (!name) {
+    ElMessage.error("请先填写新商品名称");
+    return;
+  }
+  if (!groupName) {
+    ElMessage.error("请先填写商品分组");
+    return;
+  }
+
+  const baseDescription = product.value.description?.trim() || "";
+  const extraDescription = templateCreateForm.value.descriptionAppend.trim();
+  creatingFromTemplate.value = true;
+  try {
+    const created = await createProduct(
+      buildProductPayload(product.value, {
+        name,
+        groupName,
+        status: templateCreateForm.value.status,
+        description: extraDescription
+          ? [baseDescription, extraDescription].filter(Boolean).join("\n\n")
+          : baseDescription,
+        automationConfig: templateCreateForm.value.inheritAutomation
+          ? { ...product.value.automationConfig }
+          : buildEmptyAutomationConfig(product.value.automationConfig),
+        upstreamMapping: templateCreateForm.value.inheritUpstreamMapping
+          ? { ...product.value.upstreamMapping }
+          : buildEmptyUpstreamMapping(product.value.upstreamMapping)
+      })
+    );
+    templateCreateVisible.value = false;
+    ElMessage.success(`已基于模板创建商品 ${created.productNo}`);
+    await router.push(`/catalog/products/${created.id}`);
+  } catch (error: any) {
+    ElMessage.error(error?.message ?? "按模板创建商品失败");
+  } finally {
+    creatingFromTemplate.value = false;
+  }
+}
+
 function applyPreset(channel: "LOCAL" | "MOFANG_CLOUD" | "ZJMF_API") {
   if (!product.value) return;
   if (channel === "LOCAL") {
@@ -522,6 +855,23 @@ function sortPricingRows() {
   });
 }
 
+function normalizePricingRows(silent = false) {
+  if (!product.value) return;
+  product.value.pricing = product.value.pricing.map((item, index) => {
+    const normalizedCode = (item.cycleCode || "").trim() || `custom-${index + 1}`;
+    const normalizedName = (item.cycleName || "").trim() || commonCycleNameMap.get(normalizedCode) || `自定义周期 ${index + 1}`;
+    return {
+      ...item,
+      cycleCode: normalizedCode,
+      cycleName: normalizedName,
+      price: Number(item.price || 0),
+      setupFee: Number(item.setupFee || 0)
+    };
+  });
+  sortPricingRows();
+  if (!silent) ElMessage.success("已规范化价格周期编码和名称");
+}
+
 function duplicatePricingRow(index: number) {
   if (!product.value) return;
   const target = product.value.pricing[index];
@@ -577,6 +927,52 @@ function duplicateConfigOption(index: number) {
     name: `${target.name} 副本`,
     choices: target.choices.map(choice => ({ ...choice }))
   });
+}
+
+function sortConfigOptions() {
+  if (!product.value) return;
+  product.value.configOptions = [...product.value.configOptions].sort((a, b) => {
+    if (a.required !== b.required) return a.required ? -1 : 1;
+    return (a.code || "").localeCompare(b.code || "");
+  });
+}
+
+function sortChoiceList(option: ProductConfigOption) {
+  option.choices = [...option.choices].sort((a, b) => (a.label || a.value).localeCompare(b.label || b.value));
+  if (option.defaultValue && !option.choices.some(choice => choice.value === option.defaultValue)) {
+    option.defaultValue = option.choices[0]?.value || "";
+  }
+}
+
+function normalizeConfigOptions(silent = false) {
+  if (!product.value) return;
+  product.value.configOptions = product.value.configOptions.map((option, optionIndex) => {
+    const normalizedChoices = option.inputType === "text"
+      ? []
+      : option.choices
+          .map((choice, choiceIndex) => ({
+            ...choice,
+            value: (choice.value || "").trim() || `value_${choiceIndex + 1}`,
+            label: (choice.label || "").trim() || (choice.value || "").trim() || `选项 ${choiceIndex + 1}`,
+            priceDelta: Number(choice.priceDelta || 0)
+          }))
+          .filter(choice => choice.value);
+    const fallbackDefault =
+      option.inputType === "text"
+        ? (option.defaultValue || "").trim()
+        : normalizedChoices.find(choice => choice.value === option.defaultValue)?.value || normalizedChoices[0]?.value || "";
+    return {
+      ...option,
+      code: (option.code || "").trim() || `config_${optionIndex + 1}`,
+      name: (option.name || "").trim() || `配置项 ${optionIndex + 1}`,
+      description: (option.description || "").trim(),
+      defaultValue: fallbackDefault,
+      choices: normalizedChoices
+    };
+  });
+  product.value.configOptions.forEach(option => sortChoiceList(option));
+  sortConfigOptions();
+  if (!silent) ElMessage.success("已规范化配置项编码、默认值和选项顺序");
 }
 
 function removeConfigOption(index: number) {
@@ -930,6 +1326,9 @@ onMounted(async () => {
       <template #actions>
         <el-button @click="router.push('/catalog/products')">{{ t.back }}</el-button>
         <el-button @click="loadProductDetail">{{ t.refresh }}</el-button>
+        <el-button plain @click="openTemplateCreateDialog">按模板新建</el-button>
+        <el-button plain @click="exportTemplatePackage">导出标准包</el-button>
+        <el-button plain @click="triggerTemplatePackageImport">导入标准包</el-button>
         <el-button plain :loading="copying" @click="duplicateCurrentProduct">复制商品</el-button>
         <el-button plain :loading="statusUpdating" @click="toggleCurrentProductStatus">
           {{ product?.status === "ACTIVE" ? "停用商品" : "启用商品" }}
@@ -1280,7 +1679,10 @@ onMounted(async () => {
               <div class="section-card__head">
                 <strong>价格矩阵</strong>
                 <div class="inline-actions">
+                  <el-button size="small" plain @click="exportPricingDraft">导出草稿</el-button>
+                  <el-button size="small" plain @click="triggerPricingImport">导入草稿</el-button>
                   <el-button size="small" plain @click="addCommonPricingRows">补齐常用周期</el-button>
+                  <el-button size="small" plain @click="normalizePricingRows">规范化周期</el-button>
                   <el-button size="small" plain @click="sortPricingRows">排序周期</el-button>
                   <el-button type="primary" plain size="small" @click="addPricingRow">新增周期</el-button>
                 </div>
@@ -1323,15 +1725,19 @@ onMounted(async () => {
               <div class="summary-pill"><span>选择类</span><strong>{{ configSummary.selectLike }}</strong></div>
               <div class="summary-pill"><span>选项总数</span><strong>{{ configSummary.totalChoices }}</strong></div>
             </div>
-            <div class="table-toolbar">
-              <div class="table-toolbar__meta">
-                <strong>配置项编辑台</strong>
-                <span>快速维护下拉、单选、文本类配置，并控制默认值和加价策略</span>
-              </div>
-              <div class="inline-actions">
-                <el-button plain @click="addSelectConfigOption">新增下拉项</el-button>
-                <el-button plain @click="addTextConfigOption">新增文本项</el-button>
-                <el-button type="primary" plain @click="addConfigOption">新增配置项</el-button>
+              <div class="table-toolbar">
+                <div class="table-toolbar__meta">
+                  <strong>配置项编辑台</strong>
+                  <span>快速维护下拉、单选、文本类配置，并控制默认值和加价策略</span>
+                </div>
+                <div class="inline-actions">
+                  <el-button plain @click="exportConfigDraft">导出草稿</el-button>
+                  <el-button plain @click="triggerConfigImport">导入草稿</el-button>
+                  <el-button plain @click="normalizeConfigOptions">规范化配置项</el-button>
+                  <el-button plain @click="sortConfigOptions">排序配置项</el-button>
+                  <el-button plain @click="addSelectConfigOption">新增下拉项</el-button>
+                  <el-button plain @click="addTextConfigOption">新增文本项</el-button>
+                  <el-button type="primary" plain @click="addConfigOption">新增配置项</el-button>
               </div>
             </div>
             <div class="portal-grid" style="gap: 16px">
@@ -1339,6 +1745,7 @@ onMounted(async () => {
                 <div class="section-card__head">
                   <strong>{{ option.name || `配置项 ${optionIndex + 1}` }}</strong>
                   <div class="inline-actions">
+                    <el-button size="small" plain @click="sortChoiceList(option)">排序选项</el-button>
                     <el-button size="small" plain @click="duplicateConfigOption(optionIndex)">复制配置项</el-button>
                     <el-button size="small" type="primary" plain @click="addChoice(option)">新增选项</el-button>
                     <el-button size="small" link type="danger" @click="removeConfigOption(optionIndex)">删除配置项</el-button>
@@ -1416,5 +1823,75 @@ onMounted(async () => {
         </el-tabs>
       </template>
     </PageWorkbench>
+    <el-dialog v-model="templateCreateVisible" title="按模板快速新建商品" width="560px">
+      <el-form label-position="top">
+        <el-alert
+          title="会基于当前商品页的价格、配置项、云模板和渠道策略创建一个同类新商品。"
+          description="适合同类套餐、不同分组的商品快速上架。默认不继承上游映射，避免误绑到同一个远端商品。"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+        <el-form-item label="新商品名称">
+          <el-input v-model="templateCreateForm.name" placeholder="例如：高防云主机 Pro" />
+        </el-form-item>
+        <el-form-item label="商品分组">
+          <el-select
+            v-model="templateCreateForm.groupName"
+            filterable
+            allow-create
+            default-first-option
+            :loading="groupsLoading"
+            style="width: 100%"
+          >
+            <el-option v-for="group in productGroups" :key="group" :label="group" :value="group" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="商品状态">
+          <el-select v-model="templateCreateForm.status" style="width: 100%">
+            <el-option label="启用" value="ACTIVE" />
+            <el-option label="停用" value="INACTIVE" />
+          </el-select>
+        </el-form-item>
+        <div class="summary-strip" style="margin-bottom: 16px">
+          <div class="summary-pill"><span>继承自动化</span><el-switch v-model="templateCreateForm.inheritAutomation" /></div>
+          <div class="summary-pill"><span>继承上游映射</span><el-switch v-model="templateCreateForm.inheritUpstreamMapping" /></div>
+        </div>
+        <el-form-item label="补充备注">
+          <el-input
+            v-model="templateCreateForm.descriptionAppend"
+            type="textarea"
+            :rows="3"
+            placeholder="例如：该商品用于 2026 春季新套餐"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="templateCreateVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creatingFromTemplate" @click="createProductFromTemplate">创建商品</el-button>
+      </template>
+    </el-dialog>
+    <input
+      ref="pricingImportInputRef"
+      type="file"
+      accept=".json,application/json"
+      style="display: none"
+      @change="handlePricingImport"
+    />
+    <input
+      ref="configImportInputRef"
+      type="file"
+      accept=".json,application/json"
+      style="display: none"
+      @change="handleConfigImport"
+    />
+    <input
+      ref="templatePackageImportInputRef"
+      type="file"
+      accept=".json,application/json"
+      style="display: none"
+      @change="handleTemplatePackageImport"
+    />
   </div>
 </template>

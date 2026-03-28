@@ -102,13 +102,45 @@ export interface PortalServiceDetailRecord extends PortalService {
   resourceSnapshot: PortalServiceResourceSnapshot;
 }
 
+export interface PortalOrderRequestRecord {
+  id: number;
+  requestNo: string;
+  orderId: number;
+  orderNo: string;
+  customerId: number;
+  customerName: string;
+  productName: string;
+  type: string;
+  status: string;
+  summary: string;
+  reason: string;
+  currentAmount: number;
+  requestedAmount: number;
+  currentBillingCycle: string;
+  requestedBillingCycle: string;
+  sourceType: string;
+  sourceId: number;
+  sourceName: string;
+  processorType: string;
+  processorId: number;
+  processorName: string;
+  processNote: string;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  processedAt: string;
+}
+
 export interface PortalServiceChangeOrder {
   id: number;
   serviceId: number;
+  serviceNo: string;
   orderId: number;
   orderNo: string;
   invoiceId: number;
   invoiceNo: string;
+  productName: string;
+  providerType: string;
   actionName: string;
   title: string;
   amount: number;
@@ -122,13 +154,6 @@ export interface PortalServiceChangeOrder {
   refundedAt: string;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface PortalServiceDetailResponse {
-  service: PortalServiceDetailRecord;
-  order?: PortalOrder;
-  invoice?: PortalInvoice;
-  changeOrders: PortalServiceChangeOrder[];
 }
 
 export interface PortalOrder {
@@ -173,6 +198,44 @@ export interface PortalPayment {
   status: string;
   operator: string;
   paidAt: string;
+}
+
+export interface PortalRefund {
+  id: number;
+  refundNo: string;
+  invoiceId: number;
+  orderId: number;
+  customerId: number;
+  amount: number;
+  reason: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface PortalServiceDetailResponse {
+  service: PortalServiceDetailRecord;
+  order?: PortalOrder;
+  invoice?: PortalInvoice;
+  changeOrders: PortalServiceChangeOrder[];
+}
+
+export interface PortalOrderDetailResponse {
+  order: PortalOrder;
+  invoices: PortalInvoice[];
+  services: PortalServiceDetailRecord[];
+  requests: PortalOrderRequestRecord[];
+  changeOrder?: PortalServiceChangeOrder;
+  auditLogs: Array<Record<string, unknown>>;
+}
+
+export interface PortalInvoiceDetailResponse {
+  invoice: PortalInvoice;
+  order?: PortalOrder;
+  services: PortalServiceDetailRecord[];
+  changeOrder?: PortalServiceChangeOrder;
+  payments: PortalPayment[];
+  refunds: PortalRefund[];
+  auditLogs: Array<Record<string, unknown>>;
 }
 
 export interface PortalTicket {
@@ -325,6 +388,7 @@ export interface PortalIdentity {
   countryCode: string;
   reviewRemark: string;
   reviewedAt: string;
+  submittedAt: string;
 }
 
 export interface PortalCustomer {
@@ -360,6 +424,42 @@ export interface CheckoutRequest {
   selectedOptions: CheckoutSelection[];
 }
 
+export interface CreatePortalOrderRequestPayload {
+  type: string;
+  summary?: string;
+  reason: string;
+  requestedAmount?: number;
+  requestedBillingCycle?: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface UpdatePortalProfilePayload {
+  name: string;
+  email: string;
+  mobile: string;
+  remarks?: string;
+}
+
+export interface SavePortalContactPayload {
+  name: string;
+  email?: string;
+  mobile?: string;
+  roleName?: string;
+  isPrimary?: boolean;
+}
+
+export interface SubmitPortalIdentityPayload {
+  identityType: string;
+  subjectName: string;
+  certNo: string;
+  countryCode?: string;
+}
+
+export interface ChangePortalPasswordPayload {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export interface CheckoutResult {
   order: PortalOrder;
   invoice: PortalInvoice;
@@ -369,6 +469,41 @@ export interface PayInvoiceResult {
   invoice: PortalInvoice;
   service?: PortalService;
   payment?: PortalPayment;
+}
+
+export interface PortalKYCRecord {
+  id: number;
+  pluginCode: string;
+  customerId: number;
+  realName: string;
+  idCardNo: string;
+  mobile: string;
+  status: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface SubmitZhimaKYCRequest {
+  realName: string;
+  idCardNo: string;
+  mobile?: string;
+}
+
+export interface CreateRechargeOrderRequest {
+  amount: number;
+  subject?: string;
+}
+
+export interface RechargeOrderResult {
+  id: number;
+  pluginCode: string;
+  orderNo: string;
+  amount: number;
+  currency: string;
+  subject: string;
+  status: string;
+  payUrl: string;
+  createdAt: string;
 }
 
 async function unwrap<T>(promise: Promise<ApiEnvelope<T>>): Promise<T> {
@@ -382,6 +517,34 @@ export function loadDashboard() {
 
 export function loadWallet() {
   return unwrap(requestJson<ApiEnvelope<PortalWalletOverview>>("/wallet"));
+}
+
+export function loadWalletTransactions(params?: {
+  transactionType?: string;
+  keyword?: string;
+  channel?: string;
+  limit?: number;
+}) {
+  const search = new URLSearchParams();
+  if (params?.transactionType) search.set("transactionType", params.transactionType);
+  if (params?.keyword) search.set("keyword", params.keyword);
+  if (params?.channel) search.set("channel", params.channel);
+  if (params?.limit) search.set("limit", String(params.limit));
+  const suffix = search.size ? `?${search.toString()}` : "";
+  return unwrap(requestJson<ApiEnvelope<ListResponse<PortalWalletTransaction>>>(`/wallet/transactions${suffix}`));
+}
+
+export function loadWalletRecharges(params?: {
+  keyword?: string;
+  channel?: string;
+  limit?: number;
+}) {
+  const search = new URLSearchParams();
+  if (params?.keyword) search.set("keyword", params.keyword);
+  if (params?.channel) search.set("channel", params.channel);
+  if (params?.limit) search.set("limit", String(params.limit));
+  const suffix = search.size ? `?${search.toString()}` : "";
+  return unwrap(requestJson<ApiEnvelope<ListResponse<PortalWalletTransaction>>>(`/wallet/recharges${suffix}`));
 }
 
 export async function loadStoreProducts() {
@@ -403,8 +566,55 @@ export async function loadOrders() {
   return result.data.items;
 }
 
+export function loadOrderDetail(id: number | string) {
+  return unwrap(requestJson<ApiEnvelope<PortalOrderDetailResponse>>(`/orders/${id}`));
+}
+
+export function createOrderRequest(orderId: number | string, payload: CreatePortalOrderRequestPayload) {
+  return unwrap(
+    requestJson<ApiEnvelope<PortalOrderDetailResponse>>(`/orders/${orderId}/requests`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
 export async function loadInvoices() {
   const result = await requestJson<ApiEnvelope<ListResponse<PortalInvoice>>>("/invoices");
+  return result.data.items;
+}
+
+export function loadInvoiceDetail(id: number | string) {
+  return unwrap(requestJson<ApiEnvelope<PortalInvoiceDetailResponse>>(`/invoices/${id}`));
+}
+
+export async function loadPayments(params?: {
+  invoiceId?: number;
+  keyword?: string;
+  channel?: string;
+  status?: string;
+}) {
+  const search = new URLSearchParams();
+  if (params?.invoiceId) search.set("invoiceId", String(params.invoiceId));
+  if (params?.keyword) search.set("keyword", params.keyword);
+  if (params?.channel) search.set("channel", params.channel);
+  if (params?.status) search.set("status", params.status);
+  const suffix = search.size ? `?${search.toString()}` : "";
+  const result = await requestJson<ApiEnvelope<ListResponse<PortalPayment>>>(`/payments${suffix}`);
+  return result.data.items;
+}
+
+export async function loadRefunds(params?: {
+  invoiceId?: number;
+  keyword?: string;
+  status?: string;
+}) {
+  const search = new URLSearchParams();
+  if (params?.invoiceId) search.set("invoiceId", String(params.invoiceId));
+  if (params?.keyword) search.set("keyword", params.keyword);
+  if (params?.status) search.set("status", params.status);
+  const suffix = search.size ? `?${search.toString()}` : "";
+  const result = await requestJson<ApiEnvelope<ListResponse<PortalRefund>>>(`/refunds${suffix}`);
   return result.data.items;
 }
 
@@ -452,6 +662,67 @@ export function loadAccount() {
   return unwrap(requestJson<ApiEnvelope<PortalAccount>>("/account"));
 }
 
+export function updateProfile(payload: UpdatePortalProfilePayload) {
+  return unwrap(
+    requestJson<ApiEnvelope<PortalAccount>>("/account/profile", {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export function loadContacts() {
+  return unwrap(requestJson<ApiEnvelope<ListResponse<PortalContact>>>("/account/contacts"));
+}
+
+export function createContact(payload: SavePortalContactPayload) {
+  return unwrap(
+    requestJson<ApiEnvelope<PortalContact>>("/account/contacts", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export function updateContact(contactId: number | string, payload: SavePortalContactPayload) {
+  return unwrap(
+    requestJson<ApiEnvelope<PortalContact>>(`/account/contacts/${contactId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export function deleteContact(contactId: number | string) {
+  return unwrap(
+    requestJson<ApiEnvelope<{ deleted: boolean }>>(`/account/contacts/${contactId}`, {
+      method: "DELETE"
+    })
+  );
+}
+
+export function loadIdentity() {
+  return unwrap(requestJson<ApiEnvelope<{ identity?: PortalIdentity | null }>>("/account/identity"));
+}
+
+export function submitIdentity(payload: SubmitPortalIdentityPayload) {
+  return unwrap(
+    requestJson<ApiEnvelope<PortalIdentity>>("/account/identity", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export function changePortalPassword(payload: ChangePortalPasswordPayload) {
+  return unwrap(
+    requestJson<ApiEnvelope<{ changed: boolean }>>("/account/security/password", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
 export function checkoutProduct(payload: CheckoutRequest) {
   return unwrap(
     requestJson<ApiEnvelope<CheckoutResult>>("/orders/checkout", {
@@ -469,90 +740,30 @@ export function payInvoice(invoiceId: number) {
   );
 }
 
-export function formatCurrency(value: number | string) {
-  const numeric = typeof value === "number" ? value : Number.parseFloat(String(value));
-  if (Number.isNaN(numeric)) {
-    return "¥0.00";
-  }
-  return `¥${numeric.toFixed(2)}`;
+export function submitZhimaKYC(payload: SubmitZhimaKYCRequest) {
+  return unwrap(
+    requestJson<ApiEnvelope<PortalKYCRecord>>("/plugins/kyc/zhima_kyc/verify", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    })
+  );
 }
 
-export function formatProductType(type: string) {
-  const mapping: Record<string, string> = {
-    CLOUD: "云主机",
-    BANDWIDTH: "带宽产品",
-    COLOCATION: "机柜托管",
-    HOST: "物理服务器",
-    NETWORK: "网络产品"
-  };
-  return mapping[type] ?? type;
+export async function loadZhimaKYCRecords(limit = 20) {
+  const result = await requestJson<ApiEnvelope<ListResponse<PortalKYCRecord>>>(`/plugins/kyc/records?limit=${limit}`);
+  return result.data.items;
 }
 
-export function formatBillingCycle(cycle: string) {
-  const mapping: Record<string, string> = {
-    monthly: "月付",
-    quarterly: "季付",
-    semiannual: "半年付",
-    annual: "年付",
-    annually: "年付"
-  };
-  return mapping[cycle] ?? cycle;
-}
-
-export function formatOrderStatus(status: string) {
-  const mapping: Record<string, string> = {
-    PENDING: "待支付",
-    ACTIVE: "已开通"
-  };
-  return mapping[status] ?? status;
-}
-
-export function formatInvoiceStatus(status: string) {
-  const mapping: Record<string, string> = {
-    UNPAID: "未支付",
-    PAID: "已支付",
-    REFUNDED: "已退款"
-  };
-  return mapping[status] ?? status;
-}
-
-export function formatServiceStatus(status: string) {
-  const mapping: Record<string, string> = {
-    PENDING: "待开通",
-    ACTIVE: "运行中",
-    SUSPENDED: "已暂停",
-    TERMINATED: "已终止"
-  };
-  return mapping[status] ?? status;
-}
-
-export function formatIdentityStatus(status: string) {
-  const mapping: Record<string, string> = {
-    PENDING: "待审核",
-    APPROVED: "已通过",
-    REJECTED: "已驳回"
-  };
-  return mapping[status] ?? status;
-}
-
-export function tagTypeByStatus(status: string): "success" | "warning" | "danger" | "info" {
-  switch (status) {
-    case "ACTIVE":
-    case "PAID":
-    case "APPROVED":
-    case "CLOSED":
-    case "COMPLETED":
-      return "success";
-    case "PENDING":
-    case "UNPAID":
-    case "PROCESSING":
-      return "warning";
-    case "REJECTED":
-    case "DISABLED":
-    case "REFUNDED":
-    case "TERMINATED":
-      return "danger";
-    default:
-      return "info";
-  }
+export function createRechargeOrder(payload: CreateRechargeOrderRequest) {
+  return unwrap(
+    requestJson<ApiEnvelope<RechargeOrderResult>>("/plugins/payment/epay/orders", {
+      method: "POST",
+      body: JSON.stringify({
+        orderNo: `RECHARGE-${Date.now()}`,
+        amount: payload.amount,
+        currency: "CNY",
+        subject: payload.subject || "钱包在线充值"
+      })
+    })
+  );
 }

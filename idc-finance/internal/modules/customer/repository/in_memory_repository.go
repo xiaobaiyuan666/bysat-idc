@@ -343,6 +343,29 @@ func (repository *MemoryRepository) DeleteContact(customerID, contactID int64) (
 	return domain.Customer{}, false
 }
 
+func (repository *MemoryRepository) SubmitIdentity(customerID int64, identity domain.Identity) (domain.Customer, bool) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	for customerIndex, item := range repository.items {
+		if item.ID != customerID {
+			continue
+		}
+		if item.Identity == nil {
+			identity.ID = customerID
+		} else {
+			identity.ID = item.Identity.ID
+		}
+		identity.VerifyStatus = domain.IdentityStatusPending
+		identity.ReviewRemark = ""
+		identity.ReviewedAt = ""
+		identity.SubmittedAt = time.Now().Format("2006-01-02 15:04:05")
+		item.Identity = &identity
+		repository.items[customerIndex] = item
+		return item, true
+	}
+	return domain.Customer{}, false
+}
+
 func (repository *MemoryRepository) ReviewIdentity(customerID int64, status domain.IdentityStatus, reviewRemark string) (domain.Customer, bool) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
@@ -365,16 +388,11 @@ func (repository *MemoryRepository) ListServiceItems(customerID int64) []domain.
 	}
 	return []domain.RelatedItem{
 		{
-			ID:           1,
-			ServiceID:    1,
-			No:           "SRV-DEMO-0001",
-			Name:         "弹性云主机 CN2 标准型",
-			Status:       "ACTIVE",
-			DueAt:        "2026-04-20",
-			Description:  "后续接入真实服务模块",
-			ProviderType: "MOFANG_CLOUD",
-			RegionName:   "华东 1",
-			IPAddress:    "203.0.113.10",
+			No:          "SRV-DEMO-0001",
+			Name:        "弹性云主机 CN2 标准型",
+			Status:      "ACTIVE",
+			DueAt:       "2026-04-20",
+			Description: "后续接入真实服务模块",
 		},
 	}
 }
@@ -385,14 +403,11 @@ func (repository *MemoryRepository) ListInvoiceItems(customerID int64) []domain.
 	}
 	return []domain.RelatedItem{
 		{
-			ID:           1,
-			InvoiceID:    1,
-			No:           "INV-DEMO-0001",
-			Name:         "云主机新购账单",
-			Status:       "UNPAID",
-			Amount:       "199.00",
-			DueAt:        "2026-03-30",
-			BillingCycle: "monthly",
+			No:     "INV-DEMO-0001",
+			Name:   "云主机新购账单",
+			Status: "UNPAID",
+			Amount: "199.00",
+			DueAt:  "2026-03-30",
 		},
 	}
 }
@@ -403,8 +418,6 @@ func (repository *MemoryRepository) ListTicketItems(customerID int64) []domain.R
 	}
 	return []domain.RelatedItem{
 		{
-			ID:        1,
-			TicketID:  1,
 			No:        "TIC-DEMO-0001",
 			Name:      "实例网络异常排查",
 			Status:    "PROCESSING",

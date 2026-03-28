@@ -250,7 +250,12 @@ func (handler *Handler) adminCreateServiceChangeOrder(c *gin.Context) {
 
 func (handler *Handler) RegisterPortalRoutes(router *gin.RouterGroup) {
 	router.GET("/orders", handler.listPortalOrders)
+	router.GET("/orders/:id", handler.portalOrderDetail)
+	router.POST("/orders/:id/requests", handler.portalCreateOrderRequest)
 	router.GET("/invoices", handler.listPortalInvoices)
+	router.GET("/invoices/:id", handler.portalInvoiceDetail)
+	router.GET("/payments", handler.listPortalPayments)
+	router.GET("/refunds", handler.listPortalRefunds)
 	router.GET("/services", handler.listPortalServices)
 	router.GET("/services/:id", handler.portalServiceDetail)
 	router.POST("/orders/checkout", handler.checkout)
@@ -698,12 +703,143 @@ func (handler *Handler) listPortalOrders(c *gin.Context) {
 	}, middleware.GetRequestID(c)))
 }
 
+func (handler *Handler) portalOrderDetail(c *gin.Context) {
+	orderID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "订单编号格式不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	detail, ok := handler.service.GetOrderDetail(orderID)
+	if !ok || detail.Order.CustomerID != getPortalCustomerID(c) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":      "ORDER_NOT_FOUND",
+			"message":   "订单不存在或无权查看",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(detail, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) portalCreateOrderRequest(c *gin.Context) {
+	orderID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "订单编号格式不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	var request dto.CreateOrderRequestRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "订单申请参数不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	result, ok, createErr := handler.service.CreatePortalOrderRequest(
+		getPortalCustomerID(c),
+		getPortalCustomerName(c),
+		orderID,
+		request,
+		middleware.GetRequestID(c),
+	)
+	if createErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "ORDER_REQUEST_CREATE_FAILED",
+			"message":   createErr.Error(),
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":      "ORDER_NOT_FOUND",
+			"message":   "订单不存在或无权提交申请",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(result, middleware.GetRequestID(c)))
+}
+
 func (handler *Handler) listPortalInvoices(c *gin.Context) {
 	customerID := getPortalCustomerID(c)
 	items := handler.service.ListInvoicesByCustomer(customerID)
 	c.JSON(http.StatusOK, appErrors.Ok(dto.InvoiceListResponse{
 		Items: items,
 		Total: len(items),
+	}, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) portalInvoiceDetail(c *gin.Context) {
+	invoiceID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":      "INVALID_ARGUMENT",
+			"message":   "账单编号格式不正确",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	detail, ok := handler.service.GetInvoiceDetail(invoiceID)
+	if !ok || detail.Invoice.CustomerID != getPortalCustomerID(c) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":      "INVOICE_NOT_FOUND",
+			"message":   "账单不存在或无权查看",
+			"requestId": middleware.GetRequestID(c),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, appErrors.Ok(detail, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) listPortalPayments(c *gin.Context) {
+	items, total := handler.service.ListPayments(domain.PaymentListFilter{
+		Page:       1,
+		Limit:      200,
+		Sort:       "paid_at",
+		Order:      "desc",
+		CustomerID: getPortalCustomerID(c),
+		InvoiceID:  parseOptionalInt64(c.Query("invoiceId")),
+		Keyword:    strings.TrimSpace(c.Query("keyword")),
+		Channel:    strings.TrimSpace(c.Query("channel")),
+		Status:     strings.TrimSpace(c.Query("status")),
+	})
+	c.JSON(http.StatusOK, appErrors.Ok(dto.PaymentListResponse{
+		Items: items,
+		Total: total,
+	}, middleware.GetRequestID(c)))
+}
+
+func (handler *Handler) listPortalRefunds(c *gin.Context) {
+	items, total := handler.service.ListRefunds(domain.RefundListFilter{
+		Page:       1,
+		Limit:      200,
+		Sort:       "created_at",
+		Order:      "desc",
+		CustomerID: getPortalCustomerID(c),
+		InvoiceID:  parseOptionalInt64(c.Query("invoiceId")),
+		Keyword:    strings.TrimSpace(c.Query("keyword")),
+		Status:     strings.TrimSpace(c.Query("status")),
+	})
+	c.JSON(http.StatusOK, appErrors.Ok(dto.RefundListResponse{
+		Items: items,
+		Total: total,
 	}, middleware.GetRequestID(c)))
 }
 

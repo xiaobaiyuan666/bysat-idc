@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import StatusTabs from "@/components/workbench/StatusTabs.vue";
 import { downloadCsv } from "@/utils/download";
 import { createCustomer, fetchCustomers, type Customer } from "@/api/admin";
 
+type CustomerTab = "ALL" | "ACTIVE" | "DISABLED" | "PENDING_IDENTITY" | "APPROVED_IDENTITY";
+type CustomerStatus = "" | "ACTIVE" | "DISABLED";
+type IdentityStatus = "" | "PENDING" | "APPROVED" | "REJECTED";
+type CustomerType = "" | "COMPANY" | "PERSONAL";
+
+const route = useRoute();
 const router = useRouter();
 const loading = ref(false);
 const customers = ref<Customer[]>([]);
@@ -15,16 +21,19 @@ const dialogVisible = ref(false);
 const submitting = ref(false);
 const advancedVisible = ref(false);
 const selectedRows = ref<Customer[]>([]);
-const activeTab = ref("ALL");
+const activeTab = ref<CustomerTab>("ALL");
 
-const keyword = ref("");
-const status = ref("");
-const identityStatus = ref("");
-const customerType = ref("");
-const groupKeyword = ref("");
-const salesKeyword = ref("");
+const filters = reactive({
+  keyword: "",
+  status: "" as CustomerStatus,
+  identityStatus: "" as IdentityStatus,
+  customerType: "" as CustomerType,
+  groupKeyword: "",
+  levelKeyword: "",
+  salesKeyword: ""
+});
 
-const form = ref({
+const form = reactive({
   name: "",
   email: "",
   mobile: "",
@@ -53,19 +62,28 @@ const statusTabs = computed(() => [
 
 const filteredCustomers = computed(() =>
   customers.value.filter(item => {
-    const normalizedKeyword = keyword.value.trim();
+    const normalizedKeyword = filters.keyword.trim().toLowerCase();
+    const normalizedGroup = filters.groupKeyword.trim().toLowerCase();
+    const normalizedLevel = filters.levelKeyword.trim().toLowerCase();
+    const normalizedSales = filters.salesKeyword.trim().toLowerCase();
+
     const keywordMatched =
       !normalizedKeyword ||
-      item.customerNo.includes(normalizedKeyword) ||
-      item.name.includes(normalizedKeyword) ||
-      item.email.includes(normalizedKeyword) ||
-      item.mobile.includes(normalizedKeyword);
+      item.customerNo.toLowerCase().includes(normalizedKeyword) ||
+      item.name.toLowerCase().includes(normalizedKeyword) ||
+      item.email.toLowerCase().includes(normalizedKeyword) ||
+      item.mobile.toLowerCase().includes(normalizedKeyword);
 
-    const statusMatched = !status.value || item.status === status.value;
-    const identityMatched = !identityStatus.value || item.identity?.verifyStatus === identityStatus.value;
-    const typeMatched = !customerType.value || item.type === customerType.value;
-    const groupMatched = !groupKeyword.value || item.groupName.includes(groupKeyword.value);
-    const salesMatched = !salesKeyword.value || item.salesOwner.includes(salesKeyword.value);
+    const statusMatched = !filters.status || item.status === filters.status;
+    const identityMatched =
+      !filters.identityStatus || item.identity?.verifyStatus === filters.identityStatus;
+    const typeMatched = !filters.customerType || item.type === filters.customerType;
+    const groupMatched =
+      !normalizedGroup || item.groupName.toLowerCase().includes(normalizedGroup);
+    const levelMatched =
+      !normalizedLevel || item.levelName.toLowerCase().includes(normalizedLevel);
+    const salesMatched =
+      !normalizedSales || item.salesOwner.toLowerCase().includes(normalizedSales);
 
     const tabMatched =
       activeTab.value === "ALL" ||
@@ -73,7 +91,16 @@ const filteredCustomers = computed(() =>
       (activeTab.value === "PENDING_IDENTITY" && item.identity?.verifyStatus === "PENDING") ||
       (activeTab.value === "APPROVED_IDENTITY" && item.identity?.verifyStatus === "APPROVED");
 
-    return keywordMatched && statusMatched && identityMatched && typeMatched && groupMatched && salesMatched && tabMatched;
+    return (
+      keywordMatched &&
+      statusMatched &&
+      identityMatched &&
+      typeMatched &&
+      groupMatched &&
+      levelMatched &&
+      salesMatched &&
+      tabMatched
+    );
   })
 );
 
@@ -84,6 +111,46 @@ const pendingCount = computed(
   () => customers.value.filter(item => item.identity?.verifyStatus === "PENDING").length
 );
 const activeCount = computed(() => customers.value.filter(item => item.status === "ACTIVE").length);
+
+function readRouteQueryValue(value: unknown) {
+  if (Array.isArray(value)) return String(value[0] ?? "").trim();
+  return String(value ?? "").trim();
+}
+
+function buildRouteQuery() {
+  const query: Record<string, string> = {};
+  if (activeTab.value !== "ALL") query.tab = activeTab.value;
+  if (filters.keyword.trim()) query.keyword = filters.keyword.trim();
+  if (filters.status) query.status = filters.status;
+  if (filters.identityStatus) query.identityStatus = filters.identityStatus;
+  if (filters.customerType) query.customerType = filters.customerType;
+  if (filters.groupKeyword.trim()) query.groupName = filters.groupKeyword.trim();
+  if (filters.levelKeyword.trim()) query.levelName = filters.levelKeyword.trim();
+  if (filters.salesKeyword.trim()) query.salesKeyword = filters.salesKeyword.trim();
+  return query;
+}
+
+function applyRouteFilters() {
+  const tab = readRouteQueryValue(route.query.tab).toUpperCase();
+  activeTab.value =
+    tab === "ACTIVE" ||
+    tab === "DISABLED" ||
+    tab === "PENDING_IDENTITY" ||
+    tab === "APPROVED_IDENTITY"
+      ? (tab as CustomerTab)
+      : "ALL";
+
+  filters.keyword = readRouteQueryValue(route.query.keyword);
+  filters.status = readRouteQueryValue(route.query.status).toUpperCase() as CustomerStatus;
+  filters.identityStatus = readRouteQueryValue(route.query.identityStatus).toUpperCase() as IdentityStatus;
+  filters.customerType = readRouteQueryValue(route.query.customerType).toUpperCase() as CustomerType;
+  filters.groupKeyword = readRouteQueryValue(route.query.groupName);
+  filters.levelKeyword = readRouteQueryValue(route.query.levelName);
+  filters.salesKeyword = readRouteQueryValue(route.query.salesKeyword);
+  advancedVisible.value = Boolean(
+    filters.customerType || filters.groupKeyword || filters.levelKeyword || filters.salesKeyword
+  );
+}
 
 async function loadCustomers() {
   loading.value = true;
@@ -97,22 +164,34 @@ async function loadCustomers() {
 }
 
 function resetForm() {
-  form.value = {
-    name: "",
-    email: "",
-    mobile: "",
-    type: "COMPANY",
-    groupName: "云业务客户",
-    levelName: "标准",
-    salesOwner: "",
-    remarks: ""
-  };
+  form.name = "";
+  form.email = "";
+  form.mobile = "";
+  form.type = "COMPANY";
+  form.groupName = "云业务客户";
+  form.levelName = "标准";
+  form.salesOwner = "";
+  form.remarks = "";
 }
 
 async function handleCreate() {
+  if (!form.name.trim()) {
+    ElMessage.warning("请输入客户名称");
+    return;
+  }
+
   submitting.value = true;
   try {
-    await createCustomer(form.value);
+    await createCustomer({
+      name: form.name.trim(),
+      email: form.email.trim(),
+      mobile: form.mobile.trim(),
+      type: form.type,
+      groupName: form.groupName.trim(),
+      levelName: form.levelName.trim(),
+      salesOwner: form.salesOwner.trim(),
+      remarks: form.remarks.trim()
+    });
     ElMessage.success("客户已创建");
     dialogVisible.value = false;
     resetForm();
@@ -122,14 +201,27 @@ async function handleCreate() {
   }
 }
 
+function applyFilters() {
+  void router.replace({
+    path: "/customer/list",
+    query: buildRouteQuery()
+  });
+}
+
 function resetFilters() {
   activeTab.value = "ALL";
-  keyword.value = "";
-  status.value = "";
-  identityStatus.value = "";
-  customerType.value = "";
-  groupKeyword.value = "";
-  salesKeyword.value = "";
+  filters.keyword = "";
+  filters.status = "";
+  filters.identityStatus = "";
+  filters.customerType = "";
+  filters.groupKeyword = "";
+  filters.levelKeyword = "";
+  filters.salesKeyword = "";
+  advancedVisible.value = false;
+  selectedRows.value = [];
+  if (Object.keys(route.query).length > 0) {
+    void router.replace({ path: "/customer/list" });
+  }
 }
 
 function handleSelectionChange(rows: Customer[]) {
@@ -166,7 +258,7 @@ function exportCustomers(rows: Customer[], filename: string) {
 
 function exportCurrent() {
   exportCustomers(filteredCustomers.value, "customers-current.csv");
-  ElMessage.success("已导出当前列表");
+  ElMessage.success("已导出当前客户列表");
 }
 
 function exportSelected() {
@@ -180,6 +272,26 @@ function exportSelected() {
 
 function openDetail(row: Customer) {
   void router.push(`/customer/detail/${row.id}`);
+}
+
+function openGroupFilter(groupName: string) {
+  void router.push({
+    path: "/customer/list",
+    query: {
+      ...buildRouteQuery(),
+      groupName
+    }
+  });
+}
+
+function openLevelFilter(levelName: string) {
+  void router.push({
+    path: "/customer/list",
+    query: {
+      ...buildRouteQuery(),
+      levelName
+    }
+  });
 }
 
 function customerStatusLabel(value: string) {
@@ -220,8 +332,17 @@ function identityType(value?: string) {
   }
 }
 
-onMounted(() => {
-  void loadCustomers();
+watch(
+  () => route.query,
+  () => {
+    applyRouteFilters();
+  },
+  { deep: true }
+);
+
+onMounted(async () => {
+  applyRouteFilters();
+  await loadCustomers();
 });
 </script>
 
@@ -230,7 +351,7 @@ onMounted(() => {
     <PageWorkbench
       eyebrow="客户"
       title="客户列表"
-      subtitle="按客户状态、实名状态、客户类型和销售归属进行筛选，作为客户工作台的统一入口。"
+      subtitle="按客户状态、实名状态、等级、分组和销售归属统一筛选，作为客户运营和财务联查的主入口。"
     >
       <template #actions>
         <el-button @click="loadCustomers">刷新列表</el-button>
@@ -251,18 +372,22 @@ onMounted(() => {
         <StatusTabs v-model="activeTab" :items="statusTabs" />
 
         <div class="filter-bar">
-          <el-input v-model="keyword" placeholder="搜索客户编号、客户名称、邮箱或手机号" clearable />
-          <el-select v-model="status" placeholder="客户状态" clearable>
+          <el-input
+            v-model="filters.keyword"
+            placeholder="搜索客户编号、客户名称、邮箱或手机号"
+            clearable
+          />
+          <el-select v-model="filters.status" placeholder="客户状态" clearable>
             <el-option label="正常" value="ACTIVE" />
             <el-option label="停用" value="DISABLED" />
           </el-select>
-          <el-select v-model="identityStatus" placeholder="实名状态" clearable>
+          <el-select v-model="filters.identityStatus" placeholder="实名状态" clearable>
             <el-option label="待审核" value="PENDING" />
             <el-option label="已实名" value="APPROVED" />
             <el-option label="已驳回" value="REJECTED" />
           </el-select>
           <div class="action-group">
-            <el-button type="primary" @click="loadCustomers">应用筛选</el-button>
+            <el-button type="primary" @click="applyFilters">应用筛选</el-button>
             <el-button plain @click="advancedVisible = !advancedVisible">
               {{ advancedVisible ? "收起高级筛选" : "展开高级筛选" }}
             </el-button>
@@ -271,12 +396,13 @@ onMounted(() => {
         </div>
 
         <div v-if="advancedVisible" class="filter-bar filter-bar--compact">
-          <el-select v-model="customerType" placeholder="客户类型" clearable>
+          <el-select v-model="filters.customerType" placeholder="客户类型" clearable>
             <el-option label="企业客户" value="COMPANY" />
             <el-option label="个人客户" value="PERSONAL" />
           </el-select>
-          <el-input v-model="groupKeyword" placeholder="客户分组关键字" clearable />
-          <el-input v-model="salesKeyword" placeholder="销售归属关键字" clearable />
+          <el-input v-model="filters.groupKeyword" placeholder="客户分组" clearable />
+          <el-input v-model="filters.levelKeyword" placeholder="客户等级" clearable />
+          <el-input v-model="filters.salesKeyword" placeholder="销售归属" clearable />
         </div>
       </template>
 
@@ -310,15 +436,35 @@ onMounted(() => {
         <el-table-column prop="mobile" label="手机号" min-width="140" />
         <el-table-column prop="groupName" label="客户分组" min-width="140">
           <template #default="{ row }">
-            <el-tag effect="plain">{{ row.groupName || "-" }}</el-tag>
+            <el-button
+              v-if="row.groupName"
+              link
+              type="primary"
+              @click="openGroupFilter(row.groupName)"
+            >
+              {{ row.groupName }}
+            </el-button>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="levelName" label="客户等级" min-width="120">
           <template #default="{ row }">
-            <el-tag type="primary" effect="plain">{{ row.levelName || "-" }}</el-tag>
+            <el-button
+              v-if="row.levelName"
+              link
+              type="primary"
+              @click="openLevelFilter(row.levelName)"
+            >
+              {{ row.levelName }}
+            </el-button>
+            <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="salesOwner" label="销售归属" min-width="160" />
+        <el-table-column prop="salesOwner" label="销售归属" min-width="160">
+          <template #default="{ row }">
+            {{ row.salesOwner || "-" }}
+          </template>
+        </el-table-column>
         <el-table-column label="客户状态" min-width="120">
           <template #default="{ row }">
             <el-tag :type="customerStatusType(row.status)" effect="light">
@@ -344,7 +490,7 @@ onMounted(() => {
 
       <el-dialog v-model="dialogVisible" title="新增客户" width="560px">
         <el-form label-position="top">
-          <el-form-item label="客户名称">
+          <el-form-item label="客户名称" required>
             <el-input v-model="form.name" />
           </el-form-item>
           <div class="filter-bar filter-bar--compact">

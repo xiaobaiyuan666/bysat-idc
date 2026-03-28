@@ -29,6 +29,7 @@ type Repository interface {
 	AddContact(customerID int64, contact domain.Contact) (domain.Customer, domain.Contact, bool)
 	UpdateContact(customerID, contactID int64, contact domain.Contact) (domain.Customer, domain.Contact, bool)
 	DeleteContact(customerID, contactID int64) (domain.Customer, bool)
+	SubmitIdentity(customerID int64, identity domain.Identity) (domain.Customer, bool)
 	ReviewIdentity(customerID int64, status domain.IdentityStatus, reviewRemark string) (domain.Customer, bool)
 	ListServiceItems(customerID int64) []domain.RelatedItem
 	ListInvoiceItems(customerID int64) []domain.RelatedItem

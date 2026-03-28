@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import PageWorkbench from "@/components/workbench/PageWorkbench.vue";
 import {
@@ -10,6 +11,7 @@ import {
   type CustomerLevelRecord
 } from "@/api/admin";
 
+const router = useRouter();
 const loading = ref(false);
 const submitting = ref(false);
 const dialogVisible = ref(false);
@@ -22,9 +24,22 @@ const form = reactive({
   description: ""
 });
 
+const sortedItems = computed(() =>
+  [...items.value].sort((left, right) => {
+    if (right.priority !== left.priority) {
+      return right.priority - left.priority;
+    }
+    return left.name.localeCompare(right.name, "zh-CN");
+  })
+);
+
 const highestPriority = computed(() =>
   items.value.length ? Math.max(...items.value.map(item => item.priority)) : 0
 );
+const totalBoundCustomers = computed(() =>
+  items.value.reduce((sum, item) => sum + item.customerCount, 0)
+);
+const activeLevels = computed(() => items.value.filter(item => item.customerCount > 0).length);
 
 function resetForm() {
   editingId.value = null;
@@ -55,14 +70,33 @@ function openEdit(item: CustomerLevelRecord) {
   dialogVisible.value = true;
 }
 
+function openCustomers(item: CustomerLevelRecord) {
+  void router.push({
+    path: "/customer/list",
+    query: {
+      levelName: item.name
+    }
+  });
+}
+
 async function submitForm() {
+  if (!form.name.trim()) {
+    ElMessage.warning("请输入客户等级名称");
+    return;
+  }
+
   submitting.value = true;
   try {
+    const payload = {
+      name: form.name.trim(),
+      priority: form.priority,
+      description: form.description.trim()
+    };
     if (editingId.value) {
-      await updateCustomerLevel(editingId.value, form);
+      await updateCustomerLevel(editingId.value, payload);
       ElMessage.success("客户等级已更新");
     } else {
-      await createCustomerLevel(form);
+      await createCustomerLevel(payload);
       ElMessage.success("客户等级已创建");
     }
     dialogVisible.value = false;
@@ -92,7 +126,7 @@ onMounted(() => {
     <PageWorkbench
       eyebrow="客户"
       title="客户等级"
-      subtitle="维护优先级、服务等级和默认策略，让客户等级真正可配置。"
+      subtitle="维护优先级、等级说明和客户分层入口，让等级配置直接服务客户运营。"
     >
       <template #actions>
         <el-button @click="loadLevels">刷新</el-button>
@@ -103,24 +137,37 @@ onMounted(() => {
         <div class="summary-strip">
           <div class="summary-pill"><span>等级总数</span><strong>{{ items.length }}</strong></div>
           <div class="summary-pill"><span>最高优先级</span><strong>{{ highestPriority }}</strong></div>
-          <div class="summary-pill">
-            <span>已绑定客户</span>
-            <strong>{{ items.reduce((sum, item) => sum + item.customerCount, 0) }}</strong>
-          </div>
+          <div class="summary-pill"><span>绑定客户数</span><strong>{{ totalBoundCustomers }}</strong></div>
+          <div class="summary-pill"><span>已使用等级</span><strong>{{ activeLevels }}</strong></div>
         </div>
       </template>
 
-      <el-table :data="items" border stripe empty-text="暂无客户等级">
-        <el-table-column prop="name" label="等级名称" min-width="180" />
-        <el-table-column prop="priority" label="优先级" min-width="100" />
-        <el-table-column prop="description" label="说明" min-width="280">
+      <el-table :data="sortedItems" border stripe empty-text="暂无客户等级">
+        <el-table-column prop="name" label="等级名称" min-width="200">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openCustomers(row)">{{ row.name }}</el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="priority" label="优先级" min-width="110">
+          <template #default="{ row }">
+            <el-tag type="warning" effect="light">{{ row.priority }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="customerCount" label="绑定客户" min-width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.customerCount > 0 ? 'success' : 'info'" effect="light">
+              {{ row.customerCount }} 位
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="等级说明" min-width="340">
           <template #default="{ row }">
             {{ row.description || "暂无说明" }}
           </template>
         </el-table-column>
-        <el-table-column prop="customerCount" label="客户数" min-width="100" />
-        <el-table-column label="操作" min-width="180" fixed="right">
+        <el-table-column label="操作" min-width="220" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" @click="openCustomers(row)">查看客户</el-button>
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button
               link
@@ -140,14 +187,20 @@ onMounted(() => {
         width="520px"
       >
         <el-form label-position="top">
-          <el-form-item label="等级名称">
-            <el-input v-model="form.name" maxlength="64" />
+          <el-form-item label="等级名称" required>
+            <el-input v-model="form.name" maxlength="64" show-word-limit />
           </el-form-item>
           <el-form-item label="优先级">
             <el-input-number v-model="form.priority" :min="0" :max="999" style="width: 100%" />
           </el-form-item>
-          <el-form-item label="说明">
-            <el-input v-model="form.description" type="textarea" :rows="3" maxlength="255" />
+          <el-form-item label="等级说明">
+            <el-input
+              v-model="form.description"
+              type="textarea"
+              :rows="4"
+              maxlength="255"
+              show-word-limit
+            />
           </el-form-item>
         </el-form>
         <template #footer>

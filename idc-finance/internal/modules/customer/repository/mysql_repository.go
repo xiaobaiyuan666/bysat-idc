@@ -581,6 +581,56 @@ func (repository *MySQLRepository) DeleteContact(customerID, contactID int64) (d
 	return customer, ok
 }
 
+func (repository *MySQLRepository) SubmitIdentity(customerID int64, identity domain.Identity) (domain.Customer, bool) {
+	ctx := context.Background()
+	tx, err := repository.db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("customer mysql begin submit identity failed: %v", err)
+		return domain.Customer{}, false
+	}
+	defer rollbackCustomerTx(tx)
+
+	customer, err := repository.loadCustomer(ctx, tx, customerID)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("customer mysql load customer for identity submit failed: %v", err)
+		}
+		return domain.Customer{}, false
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO customer_identities (customer_id, identity_type, verify_status, subject_name, cert_no, country_code, review_remark, reviewed_at, submitted_at)
+VALUES (?, ?, ?, ?, ?, ?, '', NULL, NOW())
+ON DUPLICATE KEY UPDATE
+  identity_type = VALUES(identity_type),
+  verify_status = VALUES(verify_status),
+  subject_name = VALUES(subject_name),
+  cert_no = VALUES(cert_no),
+  country_code = VALUES(country_code),
+  review_remark = '',
+  reviewed_at = NULL,
+  submitted_at = NOW(),
+  updated_at = NOW()`,
+		customerID,
+		firstCustomerValue(identity.IdentityType, firstCustomerValue(customer.Type, "PERSONAL")),
+		domain.IdentityStatusPending,
+		firstCustomerValue(identity.SubjectName, customerIdentitySubject(customer)),
+		firstCustomerValue(identity.CertNo, customerIdentityCertNo(customer)),
+		firstCustomerValue(identity.CountryCode, customerIdentityCountryCode(customer)),
+	); err != nil {
+		log.Printf("customer mysql submit identity failed: %v", err)
+		return domain.Customer{}, false
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("customer mysql commit submit identity failed: %v", err)
+		return domain.Customer{}, false
+	}
+
+	updatedCustomer, ok := repository.GetByID(customerID)
+	return updatedCustomer, ok
+}
+
 func (repository *MySQLRepository) ReviewIdentity(customerID int64, status domain.IdentityStatus, reviewRemark string) (domain.Customer, bool) {
 	ctx := context.Background()
 	tx, err := repository.db.BeginTx(ctx, nil)
@@ -632,104 +682,45 @@ ON DUPLICATE KEY UPDATE
 }
 
 func (repository *MySQLRepository) ListServiceItems(customerID int64) []domain.RelatedItem {
-	rows, err := repository.db.Query(`
-SELECT
-  id,
-  service_no,
-  product_name,
-  status,
-  IFNULL(DATE_FORMAT(next_due_at, '%Y-%m-%d'), ''),
-  CONCAT('操作类型：', IFNULL(last_action, '')),
-  provider_type,
-  IFNULL(provider_resource_id, ''),
-  IFNULL(region_name, ''),
-  IFNULL(ip_address, '')
+	return repository.listRelatedItems(`
+SELECT service_no, product_name, status,
+       '',
+       IFNULL(DATE_FORMAT(next_due_at, '%Y-%m-%d'), ''),
+       '',
+       CONCAT('操作类型：', IFNULL(last_action, ''))
 FROM services
 WHERE customer_id = ?
 ORDER BY id DESC`, customerID)
-	if err != nil {
-		log.Printf("customer mysql list service items failed: %v", err)
-		return nil
-	}
-	defer rows.Close()
-
-	result := make([]domain.RelatedItem, 0)
-	for rows.Next() {
-		var item domain.RelatedItem
-		if err := rows.Scan(
-			&item.ID,
-			&item.No,
-			&item.Name,
-			&item.Status,
-			&item.DueAt,
-			&item.Description,
-			&item.ProviderType,
-			&item.ProviderResourceID,
-			&item.RegionName,
-			&item.IPAddress,
-		); err != nil {
-			log.Printf("customer mysql scan service item failed: %v", err)
-			return result
-		}
-		item.ServiceID = item.ID
-		result = append(result, item)
-	}
-	return result
 }
 
 func (repository *MySQLRepository) ListInvoiceItems(customerID int64) []domain.RelatedItem {
-	rows, err := repository.db.Query(`
-SELECT
-  id,
-  invoice_no,
-  product_name,
-  status,
-  CAST(total_amount AS CHAR),
-  IFNULL(DATE_FORMAT(due_at, '%Y-%m-%d'), ''),
-  IFNULL(billing_cycle, '')
+	return repository.listRelatedItems(`
+SELECT invoice_no, product_name, status,
+       CAST(total_amount AS CHAR),
+       IFNULL(DATE_FORMAT(due_at, '%Y-%m-%d'), ''),
+       '',
+       ''
 FROM invoices
 WHERE customer_id = ?
 ORDER BY id DESC`, customerID)
-	if err != nil {
-		log.Printf("customer mysql list invoice items failed: %v", err)
-		return nil
-	}
-	defer rows.Close()
-
-	result := make([]domain.RelatedItem, 0)
-	for rows.Next() {
-		var item domain.RelatedItem
-		if err := rows.Scan(
-			&item.ID,
-			&item.No,
-			&item.Name,
-			&item.Status,
-			&item.Amount,
-			&item.DueAt,
-			&item.BillingCycle,
-		); err != nil {
-			log.Printf("customer mysql scan invoice item failed: %v", err)
-			return result
-		}
-		item.InvoiceID = item.ID
-		result = append(result, item)
-	}
-	return result
 }
 
 func (repository *MySQLRepository) ListTicketItems(customerID int64) []domain.RelatedItem {
-	rows, err := repository.db.Query(`
-SELECT
-  id,
-  ticket_no,
-  title,
-  status,
-  IFNULL(DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s'), '')
+	return repository.listRelatedItems(`
+SELECT ticket_no, title, status,
+       '',
+       '',
+       IFNULL(DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s'), ''),
+       ''
 FROM tickets
 WHERE customer_id = ?
 ORDER BY id DESC`, customerID)
+}
+
+func (repository *MySQLRepository) listRelatedItems(query string, customerID int64) []domain.RelatedItem {
+	rows, err := repository.db.Query(query, customerID)
 	if err != nil {
-		log.Printf("customer mysql list ticket items failed: %v", err)
+		log.Printf("customer mysql list related items failed: %v", err)
 		return nil
 	}
 	defer rows.Close()
@@ -737,11 +728,10 @@ ORDER BY id DESC`, customerID)
 	result := make([]domain.RelatedItem, 0)
 	for rows.Next() {
 		var item domain.RelatedItem
-		if err := rows.Scan(&item.ID, &item.No, &item.Name, &item.Status, &item.UpdatedAt); err != nil {
-			log.Printf("customer mysql scan ticket item failed: %v", err)
+		if err := rows.Scan(&item.No, &item.Name, &item.Status, &item.Amount, &item.DueAt, &item.UpdatedAt, &item.Description); err != nil {
+			log.Printf("customer mysql scan related item failed: %v", err)
 			return result
 		}
-		item.TicketID = item.ID
 		result = append(result, item)
 	}
 	return result

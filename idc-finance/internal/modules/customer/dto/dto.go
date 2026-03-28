@@ -48,6 +48,13 @@ type UpdateContactRequest struct {
 	IsPrimary bool   `json:"isPrimary"`
 }
 
+type SubmitIdentityRequest struct {
+	IdentityType string `json:"identityType" binding:"required"`
+	SubjectName  string `json:"subjectName" binding:"required"`
+	CertNo       string `json:"certNo" binding:"required"`
+	CountryCode  string `json:"countryCode"`
+}
+
 type ReviewIdentityRequest struct {
 	Status       string `json:"status" binding:"required"`
 	ReviewRemark string `json:"reviewRemark"`

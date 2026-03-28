@@ -19,7 +19,7 @@ export function formatPortalBillingCycle(locale: LocaleCode, cycle: string | und
     annual: ["年付", "Annual"],
     annually: ["年付", "Annual"]
   };
-  const pair = mapping[String(cycle ?? "")];
+  const pair = mapping[String(cycle ?? "").toLowerCase()];
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(cycle);
 }
 
@@ -32,7 +32,7 @@ export function formatPortalProductType(locale: LocaleCode, type: string | undef
     HOST: ["物理服务器", "Dedicated Server"],
     NETWORK: ["网络产品", "Network Product"]
   };
-  const pair = mapping[String(type ?? "")];
+  const pair = mapping[String(type ?? "").toUpperCase()];
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(type);
 }
 
@@ -43,7 +43,7 @@ export function formatPortalOrderStatus(locale: LocaleCode, status: string | und
     COMPLETED: ["已完成", "Completed"],
     CANCELLED: ["已取消", "Cancelled"]
   };
-  const pair = mapping[String(status ?? "")];
+  const pair = mapping[String(status ?? "").toUpperCase()];
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(status);
 }
 
@@ -54,21 +54,21 @@ export function formatPortalInvoiceStatus(locale: LocaleCode, status: string | u
     REFUNDED: ["已退款", "Refunded"],
     VOID: ["已作废", "Voided"]
   };
-  const pair = mapping[String(status ?? "")];
+  const pair = mapping[String(status ?? "").toUpperCase()];
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(status);
 }
 
 export function formatPortalPaymentChannel(locale: LocaleCode, channel: string | undefined) {
   const mapping: Record<string, [string, string]> = {
     OFFLINE: ["线下汇款", "Offline Transfer"],
-    MANUAL: ["线下收款", "Manual Payment"],
+    MANUAL: ["人工收款", "Manual Payment"],
     ALIPAY: ["支付宝", "Alipay"],
     WECHAT: ["微信支付", "WeChat Pay"],
     BALANCE: ["余额抵扣", "Balance"],
     ONLINE: ["在线支付", "Online Payment"],
     SYSTEM: ["系统处理", "System"]
   };
-  const pair = mapping[String(channel ?? "")];
+  const pair = mapping[String(channel ?? "").toUpperCase()];
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(channel);
 }
 
@@ -79,17 +79,18 @@ export function formatPortalServiceStatus(locale: LocaleCode, status: string | u
     SUSPENDED: ["已暂停", "Suspended"],
     TERMINATED: ["已终止", "Terminated"]
   };
-  const pair = mapping[String(status ?? "")];
+  const pair = mapping[String(status ?? "").toUpperCase()];
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(status);
 }
 
 export function formatPortalTicketStatus(locale: LocaleCode, status: string | undefined) {
   const mapping: Record<string, [string, string]> = {
-    OPEN: ["处理中", "Open"],
+    OPEN: ["待处理", "Open"],
     PROCESSING: ["处理中", "Processing"],
+    WAITING_CUSTOMER: ["待您回复", "Waiting for You"],
     CLOSED: ["已关闭", "Closed"]
   };
-  const pair = mapping[String(status ?? "")];
+  const pair = mapping[String(status ?? "").toUpperCase()];
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(status);
 }
 
@@ -99,7 +100,7 @@ export function formatPortalIdentityStatus(locale: LocaleCode, status: string | 
     APPROVED: ["已通过", "Approved"],
     REJECTED: ["已驳回", "Rejected"]
   };
-  const pair = mapping[String(status ?? "")];
+  const pair = mapping[String(status ?? "").toUpperCase()];
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(status);
 }
 
@@ -108,28 +109,32 @@ export function formatPortalCustomerStatus(locale: LocaleCode, status: string | 
     ACTIVE: ["正常", "Active"],
     DISABLED: ["停用", "Disabled"]
   };
-  const pair = mapping[String(status ?? "")];
+  const pair = mapping[String(status ?? "").toUpperCase()];
   return pair ? pickLabel(locale, pair[0], pair[1]) : valueOrDash(status);
 }
 
 export function portalTagTypeByStatus(status: string | undefined): "success" | "warning" | "danger" | "info" {
-  switch (status) {
+  switch (String(status ?? "").toUpperCase()) {
     case "ACTIVE":
     case "PAID":
     case "APPROVED":
     case "CLOSED":
     case "COMPLETED":
+    case "EXECUTED":
       return "success";
     case "PENDING":
     case "UNPAID":
     case "OPEN":
     case "PROCESSING":
+    case "WAITING_CUSTOMER":
+    case "WAITING_PAYMENT":
       return "warning";
     case "REJECTED":
     case "DISABLED":
     case "REFUNDED":
     case "TERMINATED":
     case "CANCELLED":
+    case "EXECUTE_FAILED":
       return "danger";
     default:
       return "info";
@@ -142,7 +147,7 @@ function formatPortalBoolean(locale: LocaleCode, value: string) {
     return pickLabel(locale, "启用", "Enabled");
   }
   if (["false", "no", "off", "disable", "disabled", "close", "closed", "0"].includes(normalized)) {
-    return pickLabel(locale, "不启用", "Disabled");
+    return pickLabel(locale, "关闭", "Disabled");
   }
   return value;
 }
@@ -157,7 +162,7 @@ function formatPortalConfigValue(locale: LocaleCode, item: PortalServiceConfig) 
     return "-";
   }
 
-  if (["cpu"].includes(code) && /^\d+(\.\d+)?$/.test(rawValue)) {
+  if (code === "cpu" && /^\d+(\.\d+)?$/.test(rawValue)) {
     return pickLabel(locale, `${rawValue} 核`, `${rawValue} vCPU`);
   }
 

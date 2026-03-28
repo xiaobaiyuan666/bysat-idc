@@ -46,6 +46,7 @@ func PhaseOneMenus() []Menu {
 		{ID: 51, ParentID: 50, Title: "\u6e20\u9053\u8d44\u6e90", TitleEn: "Channel Resources", Name: "provider-resources", Path: "/providers/resources", Icon: "DataBoard", Permission: "provider:view"},
 		{ID: 52, ParentID: 50, Title: "\u81ea\u52a8\u5316\u4efb\u52a1", TitleEn: "Automation Tasks", Name: "provider-automation", Path: "/providers/automation", Icon: "Operation", Permission: "automation:view"},
 		{ID: 53, ParentID: 50, Title: "\u81ea\u52a8\u5316\u7b56\u7565", TitleEn: "Automation Policies", Name: "provider-automation-settings", Path: "/providers/automation-settings", Icon: "Tools", Permission: "automation:update"},
+		{ID: 56, ParentID: 50, Title: "\u63d2\u4ef6\u914d\u7f6e", TitleEn: "Plugin Settings", Name: "provider-plugins", Path: "/providers/plugins", Icon: "Setting", Permission: "provider:view"},
 
 		{ID: 60, ParentID: 0, Title: "\u62a5\u8868\u4e2d\u5fc3", TitleEn: "Reports", Name: "function-center", Path: "/reports/overview", Icon: "PieChart", Permission: "report:view"},
 		{ID: 61, ParentID: 60, Title: "\u8fd0\u8425\u62a5\u8868", TitleEn: "Operations Reports", Name: "report-overview", Path: "/reports/overview", Icon: "Histogram", Permission: "report:view"},

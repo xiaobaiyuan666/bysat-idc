@@ -334,10 +334,7 @@ func (service *Service) requestWithAccount(account resolvedProviderAccount, meth
 	if !strings.HasPrefix(account.AuthMode, "mofang") {
 		root, _ := parsed.(map[string]any)
 		if status := pickInt(root, "status"); status != 0 && status != 200 {
-			return rawResponse{}, fmt.Errorf(
-				"%s",
-				firstNonEmpty(pickString(root, "msg", "message"), "上游接口返回业务错误"),
-			)
+			return rawResponse{}, fmt.Errorf(firstNonEmpty(pickString(root, "msg", "message"), "上游接口返回业务错误"))
 		}
 	}
 

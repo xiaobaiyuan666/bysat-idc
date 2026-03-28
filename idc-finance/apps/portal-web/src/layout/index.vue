@@ -1,7 +1,7 @@
 <template>
-  <div class="portal-layout">
+  <div class="shell-layout portal-app">
     <NavVertical />
-    <div class="portal-main">
+    <div class="shell-main">
       <LayNavbar />
       <LayTag />
       <LayContent />

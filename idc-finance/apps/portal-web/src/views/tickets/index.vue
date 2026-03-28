@@ -32,6 +32,8 @@ const tickets = ref<PortalTicketRecord[]>([]);
 const services = ref<PortalService[]>([]);
 const departments = ref<PortalTicketDepartment[]>([]);
 const detail = ref<PortalTicketDetailResponse | null>(null);
+const isRouteDetail = computed(() => Number.isFinite(Number(route.params.id)) && Number(route.params.id) > 0);
+const detailSize = computed(() => (isRouteDetail.value ? "calc(100vw - 280px)" : "60%"));
 
 const filters = reactive({
   keyword: "",
@@ -80,9 +82,34 @@ const filteredTickets = computed(() =>
 const openCount = computed(() => tickets.value.filter(item => item.status === "OPEN").length);
 const processingCount = computed(() => tickets.value.filter(item => item.status === "PROCESSING").length);
 const waitingCount = computed(() => tickets.value.filter(item => item.status === "WAITING_CUSTOMER").length);
+const latestTickets = computed(() => filteredTickets.value.slice(0, 5));
 const currentLinkedService = computed(() =>
   detail.value?.ticket.serviceId ? serviceMap.value.get(detail.value.ticket.serviceId) ?? null : null
 );
+const detailStats = computed(() => ({
+  replyCount: detail.value?.replies.length ?? 0,
+  hasService: Boolean(detail.value?.ticket.serviceId),
+  hasInvoice: Boolean(currentLinkedService.value?.invoiceId),
+  hasOrder: Boolean(currentLinkedService.value?.orderId)
+}));
+const supportRows = computed(() => [
+  {
+    label: copy.value.department,
+    value: detail.value?.ticket.departmentName || "-"
+  },
+  {
+    label: copy.value.assignedAdmin,
+    value: detail.value?.ticket.assignedAdminName || "-"
+  },
+  {
+    label: copy.value.status,
+    value: detail.value ? ticketStatusLabel(detail.value.ticket.status) : "-"
+  },
+  {
+    label: copy.value.sla,
+    value: detail.value ? ticketSlaLabel(detail.value.ticket) : "-"
+  }
+]);
 
 const serviceOptions = computed(() =>
   services.value.map(item => ({
@@ -108,6 +135,10 @@ const copy = computed(() => ({
   processing: pickLabel(localeStore.locale, "处理中", "Processing"),
   waiting: pickLabel(localeStore.locale, "待您回复", "Waiting for You"),
   closed: pickLabel(localeStore.locale, "已关闭", "Closed"),
+  latest: pickLabel(localeStore.locale, "待跟进工单", "Tickets to Follow"),
+  latestDesc: pickLabel(localeStore.locale, "优先处理待处理、高优先级和待您回复的工单。", "Prioritize open, high-priority, and waiting-for-you tickets."),
+  workbench: pickLabel(localeStore.locale, "工单工作台", "Ticket Desk"),
+  workbenchDesc: pickLabel(localeStore.locale, "围绕 SLA、关联服务和沟通状态组织客户侧支持工作。", "Organize support work around SLA, linked services, and reply status."),
   listTitle: pickLabel(localeStore.locale, "工单列表", "Ticket List"),
   listDesc: pickLabel(
     localeStore.locale,
@@ -143,6 +174,7 @@ const copy = computed(() => ({
   submit: pickLabel(localeStore.locale, "提交", "Submit"),
   cancel: pickLabel(localeStore.locale, "取消", "Cancel"),
   detailTitle: pickLabel(localeStore.locale, "工单详情", "Ticket Detail"),
+  backToList: pickLabel(localeStore.locale, "返回工单列表", "Back to Tickets"),
   origin: pickLabel(localeStore.locale, "首次提单", "Original Request"),
   replyTitle: pickLabel(localeStore.locale, "回复工单", "Reply"),
   replyPlaceholder: pickLabel(localeStore.locale, "输入回复内容", "Type your reply"),
@@ -153,8 +185,18 @@ const copy = computed(() => ({
   noReplies: pickLabel(localeStore.locale, "暂无回复记录", "No replies yet"),
   assignedAdmin: pickLabel(localeStore.locale, "对接客服", "Assigned Agent"),
   createdAt: pickLabel(localeStore.locale, "提交时间", "Created"),
+  summaryTitle: pickLabel(localeStore.locale, "处理摘要", "Support Summary"),
+  supportDesk: pickLabel(localeStore.locale, "支持概览", "Support Overview"),
+  supportDeskDesc: pickLabel(localeStore.locale, "查看部门、客服、状态和时效信息。", "Review department, agent, status, and timing information."),
+  actionDesk: pickLabel(localeStore.locale, "处理动作", "Support Actions"),
+  actionDeskDesc: pickLabel(localeStore.locale, "围绕该工单快速继续处理服务、订单、账单和支持动作。", "Quickly continue service, order, invoice, and support actions around this ticket."),
+  replyCount: pickLabel(localeStore.locale, "回复数", "Replies"),
+  linkedInvoice: pickLabel(localeStore.locale, "已关联账单", "Linked Invoice"),
+  linkedOrder: pickLabel(localeStore.locale, "已关联订单", "Linked Order"),
+  linkedServiceCount: pickLabel(localeStore.locale, "已关联服务", "Linked Service"),
   relatedBusiness: pickLabel(localeStore.locale, "关联业务", "Related Business"),
   invoiceCenter: pickLabel(localeStore.locale, "账单中心", "Invoice Center"),
+  orderCenter: pickLabel(localeStore.locale, "订单中心", "Order Center"),
   createFromService: pickLabel(localeStore.locale, "继续围绕该服务提单", "Create Another Ticket"),
   serviceStatus: pickLabel(localeStore.locale, "服务状态", "Service Status"),
   providerType: pickLabel(localeStore.locale, "渠道", "Provider"),
@@ -245,7 +287,22 @@ function goToService(serviceId?: number) {
 
 function goToInvoice(serviceId?: number) {
   if (!serviceId) return;
+  const service = getLinkedService(serviceId);
+  if (service?.invoiceId) {
+    void router.push(`/invoices/${service.invoiceId}`);
+    return;
+  }
   void router.push({ path: "/invoices", query: { serviceId: String(serviceId) } });
+}
+
+function goToOrder(serviceId?: number) {
+  if (!serviceId) return;
+  const service = getLinkedService(serviceId);
+  if (service?.orderId) {
+    void router.push(`/orders/${service.orderId}`);
+    return;
+  }
+  void router.push({ path: "/orders", query: { keyword: service?.productName || undefined } });
 }
 
 async function fetchData() {
@@ -284,6 +341,9 @@ async function openDetail(ticket: PortalTicketRecord) {
     replyForm.content = "";
     replyForm.status =
       detail.value.ticket.status === "CLOSED" ? "OPEN" : detail.value.ticket.status || "OPEN";
+    if (route.path !== `/tickets/${ticket.id}`) {
+      void router.replace(`/tickets/${ticket.id}`);
+    }
   } finally {
     detailLoading.value = false;
   }
@@ -347,6 +407,14 @@ function openCreateDialog(serviceId?: number) {
   createVisible.value = true;
 }
 
+function closeDetail() {
+  detailVisible.value = false;
+  detail.value = null;
+  if (route.path !== "/tickets") {
+    void router.replace("/tickets");
+  }
+}
+
 function applyRouteState() {
   const keywordQuery = typeof route.query.keyword === "string" ? route.query.keyword : "";
   const statusQuery = typeof route.query.status === "string" ? route.query.status : "";
@@ -372,9 +440,25 @@ function applyRouteState() {
   }
 }
 
+async function syncDetailFromRoute() {
+  const ticketId = Number(route.params.id);
+  if (Number.isFinite(ticketId) && ticketId > 0) {
+    const record =
+      tickets.value.find(item => item.id === ticketId) ||
+      ({
+        id: ticketId
+      } as PortalTicketRecord);
+    await openDetail(record);
+    return;
+  }
+  detailVisible.value = false;
+  detail.value = null;
+}
+
 onMounted(async () => {
   applyRouteState();
   await fetchData();
+  await syncDetailFromRoute();
 });
 
 watch(
@@ -390,11 +474,18 @@ watch(
     applyRouteState();
   }
 );
+
+watch(
+  () => route.params.id,
+  async () => {
+    await syncDetailFromRoute();
+  }
+);
 </script>
 
 <template>
   <div class="portal-shell" v-loading="loading">
-    <section class="portal-card">
+    <section v-if="!isRouteDetail" class="portal-card">
       <div class="portal-card-head">
         <div>
           <div class="portal-badge">{{ copy.badge }}</div>
@@ -425,9 +516,66 @@ watch(
           <strong>{{ waitingCount }}</strong>
         </div>
       </div>
+
+      <section class="portal-grid portal-grid--two" style="margin-top: 20px">
+        <article class="portal-card" style="padding: 0">
+          <div style="padding: 20px 20px 0">
+            <div class="portal-card-head">
+              <div>
+                <h2 class="portal-panel__title">{{ copy.latest }}</h2>
+                <div class="portal-panel__meta">{{ copy.latestDesc }}</div>
+              </div>
+            </div>
+          </div>
+          <div v-if="latestTickets.length" class="portal-list" style="padding: 18px 20px 20px">
+            <div v-for="item in latestTickets" :key="item.id" class="portal-list-item">
+              <div class="portal-list-item__meta">
+                <div class="portal-list-item__title">{{ item.title }}</div>
+                <div class="portal-list-item__desc">{{ copy.ticketNo }}：{{ item.ticketNo }}</div>
+                <div class="portal-list-item__desc">{{ copy.updatedAt }}：{{ item.updatedAt }}</div>
+              </div>
+              <div class="portal-toolbar">
+                <el-tag :type="ticketStatusType(item.status)" effect="light">{{ ticketStatusLabel(item.status) }}</el-tag>
+                <el-tag :type="ticketPriorityType(item.priority)" effect="light">{{ ticketPriorityLabel(item.priority) }}</el-tag>
+                <el-button type="primary" link @click="openDetail(item)">{{ copy.detail }}</el-button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="portal-empty-state" style="margin: 18px 20px 20px">{{ copy.empty }}</div>
+        </article>
+
+        <article class="portal-card" style="padding: 0">
+          <div style="padding: 20px 20px 0">
+            <div class="portal-card-head">
+              <div>
+                <h2 class="portal-panel__title">{{ copy.workbench }}</h2>
+                <div class="portal-panel__meta">{{ copy.workbenchDesc }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="portal-summary" style="margin: 18px 20px 20px">
+            <div class="portal-summary-row">
+              <span>{{ copy.open }}</span>
+              <strong>{{ openCount }}</strong>
+            </div>
+            <div class="portal-summary-row">
+              <span>{{ copy.processing }}</span>
+              <strong>{{ processingCount }}</strong>
+            </div>
+            <div class="portal-summary-row">
+              <span>{{ copy.waiting }}</span>
+              <strong>{{ waitingCount }}</strong>
+            </div>
+            <div class="portal-summary-row">
+              <span>{{ copy.visible }}</span>
+              <strong>{{ filteredTickets.length }}</strong>
+            </div>
+          </div>
+        </article>
+      </section>
     </section>
 
-    <section class="portal-card portal-table-card">
+    <section v-if="!isRouteDetail" class="portal-card portal-table-card">
       <div class="portal-card-head">
         <div>
           <h2 class="portal-panel__title">{{ copy.listTitle }}</h2>
@@ -518,6 +666,14 @@ watch(
                 {{ copy.serviceDetail }}
               </el-button>
               <el-button
+                v-if="getLinkedService(row.serviceId)?.orderId"
+                type="primary"
+                link
+                @click="goToOrder(row.serviceId)"
+              >
+                {{ copy.orderCenter }}
+              </el-button>
+              <el-button
                 v-if="getLinkedService(row.serviceId)?.invoiceId"
                 type="primary"
                 link
@@ -575,7 +731,18 @@ watch(
       </template>
     </el-dialog>
 
-    <el-drawer v-model="detailVisible" :title="copy.detailTitle" size="55%">
+    <el-drawer
+      v-model="detailVisible"
+      :class="{ 'portal-detail-drawer--page': isRouteDetail }"
+      :title="copy.detailTitle"
+      :size="detailSize"
+      :modal="!isRouteDetail"
+      :close-on-click-modal="!isRouteDetail"
+      :lock-scroll="!isRouteDetail"
+      :with-header="!isRouteDetail"
+      :show-close="!isRouteDetail"
+      @close="closeDetail"
+    >
       <div v-if="detail" v-loading="detailLoading" class="ticket-detail">
         <div class="ticket-detail__head">
           <div>
@@ -590,6 +757,7 @@ watch(
             </div>
           </div>
           <div class="ticket-detail__tags">
+            <el-button plain @click="closeDetail">{{ copy.backToList }}</el-button>
             <el-tag :type="ticketPriorityType(detail.ticket.priority)" effect="light">
               {{ ticketPriorityLabel(detail.ticket.priority) }}
             </el-tag>
@@ -602,12 +770,37 @@ watch(
           </div>
         </div>
 
+        <div class="ticket-detail__summary-grid">
+          <div class="ticket-detail__summary-card">
+            <span>{{ copy.replyCount }}</span>
+            <strong>{{ detailStats.replyCount }}</strong>
+          </div>
+          <div class="ticket-detail__summary-card">
+            <span>{{ copy.linkedServiceCount }}</span>
+            <strong>{{ detailStats.hasService ? "1" : "0" }}</strong>
+          </div>
+          <div class="ticket-detail__summary-card">
+            <span>{{ copy.linkedOrder }}</span>
+            <strong>{{ detailStats.hasOrder ? "1" : "0" }}</strong>
+          </div>
+          <div class="ticket-detail__summary-card">
+            <span>{{ copy.linkedInvoice }}</span>
+            <strong>{{ detailStats.hasInvoice ? "1" : "0" }}</strong>
+          </div>
+        </div>
+
         <div class="ticket-detail__grid">
           <div class="ticket-detail__panel">
             <div class="ticket-detail__panel-head">
-              <strong>{{ copy.origin }}</strong>
+              <strong>{{ copy.supportDesk }}</strong>
             </div>
-            <div class="ticket-detail__content">{{ detail.ticket.content || "-" }}</div>
+            <div class="portal-summary">
+              <div v-for="item in supportRows" :key="item.label" class="portal-summary-row">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+            <div class="portal-panel__meta" style="margin-top: 12px">{{ copy.supportDeskDesc }}</div>
           </div>
 
           <div class="ticket-detail__panel">
@@ -638,13 +831,47 @@ watch(
               <el-button v-if="detail.ticket.serviceId" plain @click="goToService(detail.ticket.serviceId)">
                 {{ copy.serviceDetail }}
               </el-button>
+              <el-button v-if="currentLinkedService?.orderId" plain @click="goToOrder(detail.ticket.serviceId)">
+                {{ copy.orderCenter }}
+              </el-button>
               <el-button v-if="currentLinkedService?.invoiceId" plain @click="goToInvoice(detail.ticket.serviceId)">
                 {{ copy.invoiceDetail }}
               </el-button>
-              <el-button v-if="detail.ticket.serviceId" type="primary" plain @click="openCreateDialog(detail.ticket.serviceId)">
-                {{ copy.createFromService }}
-              </el-button>
             </div>
+          </div>
+        </div>
+
+        <div class="ticket-detail__grid">
+          <div class="ticket-detail__panel">
+            <div class="ticket-detail__panel-head">
+              <strong>{{ copy.origin }}</strong>
+            </div>
+            <div class="ticket-detail__content">{{ detail.ticket.content || "-" }}</div>
+          </div>
+
+          <div class="ticket-detail__panel">
+            <div class="ticket-detail__panel-head">
+              <strong>{{ copy.actionDesk }}</strong>
+            </div>
+            <div class="portal-actions-grid" style="grid-template-columns: 1fr; margin-top: 6px">
+              <button v-if="detail.ticket.serviceId" type="button" class="portal-action-card" @click="goToService(detail.ticket.serviceId)">
+                <strong>{{ copy.serviceDetail }}</strong>
+                <span>{{ currentLinkedService?.serviceNo || detail.ticket.serviceNo || "-" }}</span>
+              </button>
+              <button v-if="currentLinkedService?.orderId" type="button" class="portal-action-card" @click="goToOrder(detail.ticket.serviceId)">
+                <strong>{{ copy.orderCenter }}</strong>
+                <span>{{ pickLabel(localeStore.locale, "查看关联订单详情与续费状态。", "Review the linked order and renewal status.") }}</span>
+              </button>
+              <button v-if="currentLinkedService?.invoiceId" type="button" class="portal-action-card" @click="goToInvoice(detail.ticket.serviceId)">
+                <strong>{{ copy.invoiceDetail }}</strong>
+                <span>{{ pickLabel(localeStore.locale, "查看关联账单和支付状态。", "Review the linked invoice and payment status.") }}</span>
+              </button>
+              <button v-if="detail.ticket.serviceId" type="button" class="portal-action-card" @click="openCreateDialog(detail.ticket.serviceId)">
+                <strong>{{ copy.createFromService }}</strong>
+                <span>{{ pickLabel(localeStore.locale, "围绕当前服务继续提交新工单。", "Create another ticket for the same service.") }}</span>
+              </button>
+            </div>
+            <div class="portal-panel__meta" style="margin-top: 12px">{{ copy.actionDeskDesc }}</div>
           </div>
         </div>
 
@@ -773,6 +1000,31 @@ watch(
   gap: 16px;
 }
 
+.ticket-detail__summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ticket-detail__summary-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(214, 226, 241, 0.96);
+  background: linear-gradient(180deg, #f7fbff 0%, #fbfdff 100%);
+}
+
+.ticket-detail__summary-card span {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.ticket-detail__summary-card strong {
+  font-size: 22px;
+  color: #18386d;
+}
+
 .ticket-detail__panel {
   border: 1px solid var(--el-border-color-light);
   border-radius: 18px;
@@ -848,6 +1100,7 @@ watch(
 }
 
 @media (max-width: 960px) {
+  .ticket-detail__summary-grid,
   .ticket-detail__grid,
   .ticket-form-grid {
     grid-template-columns: 1fr;

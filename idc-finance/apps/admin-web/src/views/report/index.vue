@@ -28,10 +28,14 @@ const trendMax = computed(() => {
   return Math.max(...[...revenue, ...refund].map(item => item.amount), 1);
 });
 
+const customerGroupTotal = computed(() =>
+  totalCount(reportOverview.value?.customerGroups ?? [])
+);
+
 const quickEntries = computed(() => [
   {
     key: "identities",
-    label: "待审实名",
+    label: "待实名审核",
     value: operationsWorkbench.value?.pendingIdentities.length ?? 0,
     hint: "进入实名审核工作台",
     tone: "warning",
@@ -109,6 +113,13 @@ function goCustomerDetail(customerId: number) {
   void router.push(`/customer/detail/${customerId}`);
 }
 
+function goCustomerList(query: Record<string, string>) {
+  void router.push({
+    path: "/customer/list",
+    query
+  });
+}
+
 function goInvoiceDetail(invoiceId: number) {
   void router.push(`/billing/invoices/${invoiceId}`);
 }
@@ -131,6 +142,24 @@ function goAutomationTask(task: AutomationTask) {
   if (task.sourceId) query.sourceId = String(task.sourceId);
   if (task.sourceType) query.sourceType = task.sourceType;
   void router.push({ path: "/providers/automation", query });
+}
+
+function goProductOrders(productName: string) {
+  void router.push({
+    path: "/orders/list",
+    query: {
+      productName
+    }
+  });
+}
+
+function goProductCatalog(productName: string) {
+  void router.push({
+    path: "/catalog/products",
+    query: {
+      keyword: productName
+    }
+  });
 }
 
 async function loadOverview() {
@@ -161,12 +190,13 @@ onMounted(loadOverview);
     <PageWorkbench
       eyebrow="后台 / 报表中心"
       title="运营报表中心"
-      subtitle="对照魔方财务的后台视角，把财务走势、待办风险、服务结构、自动化异常和最近系统动作集中到一个运营入口。"
+      subtitle="把财务走势、待办风险、客户分层、自动化异常和最近系统动作集中到一个后台入口，方便管理员先看全局再处理细项。"
     >
       <template #actions>
         <el-button @click="go('/billing/invoices')">账单工作台</el-button>
         <el-button @click="go('/services/list')">服务工作台</el-button>
         <el-button @click="go('/providers/automation')">自动化任务</el-button>
+        <el-button @click="go('/customer/groups')">客户分组</el-button>
         <el-button type="primary" @click="loadOverview">刷新报表</el-button>
       </template>
 
@@ -200,7 +230,7 @@ onMounted(loadOverview);
           <div class="page-header">
             <div>
               <h2 class="section-title">近 30 日收款与退款走势</h2>
-              <p class="page-subtitle">按日观察净收入、退款压力和收款波峰，适合财务与运营复盘。</p>
+              <p class="page-subtitle">按天查看收入、退款和单量波峰，适合财务复盘与运营观察。</p>
             </div>
           </div>
 
@@ -208,7 +238,11 @@ onMounted(loadOverview);
             <div>
               <div class="block-title">收款趋势</div>
               <div class="trend-list">
-                <div v-for="item in reportOverview?.revenueTrend ?? []" :key="`revenue-${item.label}`" class="trend-item">
+                <div
+                  v-for="item in reportOverview?.revenueTrend ?? []"
+                  :key="`revenue-${item.label}`"
+                  class="trend-item"
+                >
                   <div class="trend-item__meta">
                     <strong>{{ item.label }}</strong>
                     <span>{{ formatCurrency(item.amount) }} / {{ item.count }} 笔</span>
@@ -223,13 +257,20 @@ onMounted(loadOverview);
             <div>
               <div class="block-title">退款趋势</div>
               <div class="trend-list">
-                <div v-for="item in reportOverview?.refundTrend ?? []" :key="`refund-${item.label}`" class="trend-item">
+                <div
+                  v-for="item in reportOverview?.refundTrend ?? []"
+                  :key="`refund-${item.label}`"
+                  class="trend-item"
+                >
                   <div class="trend-item__meta">
                     <strong>{{ item.label }}</strong>
                     <span>{{ formatCurrency(item.amount) }} / {{ item.count }} 笔</span>
                   </div>
                   <div class="trend-item__bar trend-item__bar--warning">
-                    <span class="trend-item__fill trend-item__fill--warning" :style="{ width: trendWidth(item) }"></span>
+                    <span
+                      class="trend-item__fill trend-item__fill--warning"
+                      :style="{ width: trendWidth(item) }"
+                    ></span>
                   </div>
                 </div>
               </div>
@@ -241,7 +282,7 @@ onMounted(loadOverview);
           <div class="page-header">
             <div>
               <h2 class="section-title">财务与服务结构</h2>
-              <p class="page-subtitle">把账单状态、服务状态、支付渠道和账期结构集中展示，方便判断经营质量。</p>
+              <p class="page-subtitle">集中查看账单状态、服务状态、支付渠道和计费周期，判断当前运营质量。</p>
             </div>
           </div>
 
@@ -274,7 +315,11 @@ onMounted(loadOverview);
 
             <div>
               <div class="ratio-title">支付渠道</div>
-              <div v-for="item in reportOverview?.paymentChannels ?? []" :key="`channel-${item.name}`" class="ratio-item">
+              <div
+                v-for="item in reportOverview?.paymentChannels ?? []"
+                :key="`channel-${item.name}`"
+                class="ratio-item"
+              >
                 <div class="ratio-item__meta">
                   <span>{{ item.name }}</span>
                   <span>{{ item.count }} / {{ formatCurrency(item.amount) }}</span>
@@ -286,7 +331,7 @@ onMounted(loadOverview);
             </div>
 
             <div>
-              <div class="ratio-title">账期结构</div>
+              <div class="ratio-title">计费周期</div>
               <div v-for="item in reportOverview?.billingCycles ?? []" :key="`cycle-${item.name}`" class="ratio-item">
                 <div class="ratio-item__meta">
                   <span>{{ item.name }}</span>
@@ -305,44 +350,104 @@ onMounted(loadOverview);
         <div class="page-card section-card">
           <div class="page-header">
             <div>
-              <h2 class="section-title">营收排行与应收排行</h2>
-              <p class="page-subtitle">先看赚钱的商品，再看应收压力集中的客户，符合魔方财务常用的运营排查路径。</p>
+              <h2 class="section-title">热销商品</h2>
+              <p class="page-subtitle">从报表直接跳商品中心和订单中心，继续做商品运营与价格复盘。</p>
             </div>
           </div>
 
-          <div class="ranking-grid">
-            <div>
-              <div class="block-title">热销商品</div>
-              <el-table :data="reportOverview?.topProducts ?? []" border stripe empty-text="暂无商品排行">
-                <el-table-column type="index" label="#" width="56" />
-                <el-table-column prop="name" label="商品名称" min-width="220" />
-                <el-table-column prop="count" label="订单数" min-width="100" />
-                <el-table-column label="累计金额" min-width="140">
-                  <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
-                </el-table-column>
-              </el-table>
-            </div>
+          <el-table :data="reportOverview?.topProducts ?? []" border stripe empty-text="暂无商品排行">
+            <el-table-column type="index" label="#" width="56" />
+            <el-table-column prop="name" label="商品名称" min-width="220" />
+            <el-table-column prop="count" label="订单数" min-width="100" />
+            <el-table-column label="累计金额" min-width="140">
+              <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" min-width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="goProductOrders(row.name)">查看订单</el-button>
+                <el-button link type="primary" @click="goProductCatalog(row.name)">商品中心</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
 
+        <div class="page-card section-card">
+          <div class="page-header">
             <div>
-              <div class="block-title">客户应收排行</div>
-              <el-table :data="reportOverview?.topReceivables ?? []" border stripe empty-text="暂无应收排行">
-                <el-table-column type="index" label="#" width="56" />
-                <el-table-column prop="name" label="客户名称" min-width="220" />
-                <el-table-column prop="count" label="未付账单数" min-width="120" />
-                <el-table-column label="应收金额" min-width="140">
-                  <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
-                </el-table-column>
-                <el-table-column prop="extra" label="最近到期时间" min-width="180" />
-              </el-table>
+              <h2 class="section-title">客户应收排行</h2>
+              <p class="page-subtitle">快速定位应收压力集中的客户，再进入客户或账单工作台处理。</p>
             </div>
           </div>
+
+          <el-table :data="reportOverview?.topReceivables ?? []" border stripe empty-text="暂无应收排行">
+            <el-table-column type="index" label="#" width="56" />
+            <el-table-column prop="name" label="客户名称" min-width="220" />
+            <el-table-column prop="count" label="未付账单数" min-width="120" />
+            <el-table-column label="应收金额" min-width="140">
+              <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
+            </el-table-column>
+            <el-table-column prop="extra" label="最近到期时间" min-width="180" />
+            <el-table-column label="操作" min-width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  type="primary"
+                  @click="goCustomerList({ keyword: row.name, status: 'ACTIVE' })"
+                >
+                  查看客户
+                </el-button>
+                <el-button link type="primary" @click="go('/billing/invoices?status=UNPAID')">
+                  账单工作台
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </div>
+
+      <div class="sub-grid">
+        <div class="page-card section-card">
+          <div class="page-header">
+            <div>
+              <h2 class="section-title">客户分组结构</h2>
+              <p class="page-subtitle">查看分组覆盖情况，并直接跳到客户分组或客户列表继续处理。</p>
+            </div>
+            <div class="action-group">
+              <el-button plain @click="go('/customer/groups')">客户分组</el-button>
+              <el-button plain @click="go('/customer/levels')">客户等级</el-button>
+            </div>
+          </div>
+
+          <div v-if="(reportOverview?.customerGroups ?? []).length" class="ratio-panel">
+            <div
+              v-for="item in reportOverview?.customerGroups ?? []"
+              :key="`customer-group-${item.name}`"
+              class="ratio-item"
+            >
+              <div class="ratio-item__meta">
+                <el-button
+                  link
+                  type="primary"
+                  class="inline-link"
+                  @click="goCustomerList({ groupName: item.name })"
+                >
+                  {{ item.name }}
+                </el-button>
+                <span>{{ item.count }} 位客户</span>
+              </div>
+              <div class="ratio-item__bar ratio-item__bar--success">
+                <span :style="{ width: ratioWidth(item, customerGroupTotal) }"></span>
+              </div>
+            </div>
+          </div>
+          <el-empty v-else description="暂无客户分组结构数据" />
         </div>
 
         <div class="page-card section-card">
           <div class="page-header">
             <div>
               <h2 class="section-title">自动化异常</h2>
-              <p class="page-subtitle">把失败和阻塞的自动化任务拉到报表中心，避免只在任务页里被动发现。</p>
+              <p class="page-subtitle">把失败和阻塞任务拉到报表中心，避免只能在任务页里被动发现。</p>
             </div>
           </div>
 
@@ -356,9 +461,25 @@ onMounted(loadOverview);
               </template>
             </el-table-column>
             <el-table-column prop="message" label="结果说明" min-width="240" />
-            <el-table-column label="操作" min-width="120" fixed="right">
+            <el-table-column label="操作" min-width="220" fixed="right">
               <template #default="{ row }">
-                <el-button type="primary" link @click="goAutomationTask(row)">查看任务</el-button>
+                <el-button link type="primary" @click="goAutomationTask(row)">查看任务</el-button>
+                <el-button
+                  v-if="row.serviceId"
+                  link
+                  type="primary"
+                  @click="goServiceDetail(row.serviceId)"
+                >
+                  查看服务
+                </el-button>
+                <el-button
+                  v-else-if="row.invoiceId"
+                  link
+                  type="primary"
+                  @click="goInvoiceDetail(row.invoiceId)"
+                >
+                  查看账单
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -369,20 +490,22 @@ onMounted(loadOverview);
         <div class="page-header">
           <div>
             <h2 class="section-title">运营待办</h2>
-            <p class="page-subtitle">待审实名、逾期账单、即将到期服务、待跟进工单，统一在这里排查和跳转。</p>
+            <p class="page-subtitle">把待实名、逾期账单、即将到期服务和待跟进工单统一收口到这里。</p>
           </div>
         </div>
 
         <el-tabs v-model="activeTodoTab">
-          <el-tab-pane :label="`待审实名 (${operationsWorkbench?.pendingIdentities.length ?? 0})`" name="identity">
-            <el-table :data="operationsWorkbench?.pendingIdentities ?? []" border stripe empty-text="暂无待审实名">
+          <el-tab-pane :label="`待实名审核 (${operationsWorkbench?.pendingIdentities.length ?? 0})`" name="identity">
+            <el-table :data="operationsWorkbench?.pendingIdentities ?? []" border stripe empty-text="暂无待实名审核">
               <el-table-column prop="customerNo" label="客户编号" min-width="140" />
               <el-table-column prop="customerName" label="客户名称" min-width="180" />
               <el-table-column prop="subjectName" label="实名主体" min-width="220" />
               <el-table-column prop="submittedAt" label="提交时间" min-width="180" />
               <el-table-column label="操作" min-width="120" fixed="right">
                 <template #default="{ row }">
-                  <el-button type="primary" link @click="goCustomerDetail(row.customerId)">查看客户</el-button>
+                  <el-button link type="primary" @click="goCustomerDetail(row.customerId)">
+                    查看客户
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -399,7 +522,9 @@ onMounted(loadOverview);
               <el-table-column prop="daysOverdue" label="逾期天数" min-width="120" />
               <el-table-column label="操作" min-width="120" fixed="right">
                 <template #default="{ row }">
-                  <el-button type="primary" link @click="goInvoiceDetail(row.invoiceId)">查看账单</el-button>
+                  <el-button link type="primary" @click="goInvoiceDetail(row.invoiceId)">
+                    查看账单
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -415,7 +540,9 @@ onMounted(loadOverview);
               <el-table-column prop="daysRemaining" label="剩余天数" min-width="120" />
               <el-table-column label="操作" min-width="120" fixed="right">
                 <template #default="{ row }">
-                  <el-button type="primary" link @click="goServiceDetail(row.serviceId)">查看服务</el-button>
+                  <el-button link type="primary" @click="goServiceDetail(row.serviceId)">
+                    查看服务
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -430,7 +557,9 @@ onMounted(loadOverview);
               <el-table-column prop="updatedAt" label="最后更新时间" min-width="180" />
               <el-table-column label="操作" min-width="120" fixed="right">
                 <template #default="{ row }">
-                  <el-button type="primary" link @click="goTicketDetail(row.ticketId)">查看工单</el-button>
+                  <el-button link type="primary" @click="goTicketDetail(row.ticketId)">
+                    查看工单
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -442,7 +571,7 @@ onMounted(loadOverview);
         <div class="page-header">
           <div>
             <h2 class="section-title">最近系统动作</h2>
-            <p class="page-subtitle">直接读取审计日志，方便排查后台最近做过的客户、订单、账单、服务和自动化动作。</p>
+            <p class="page-subtitle">直接查看审计日志，快速回溯后台最近做过的关键操作。</p>
           </div>
         </div>
 
@@ -466,7 +595,7 @@ onMounted(loadOverview);
 
 .headline-grid,
 .quick-grid,
-.ranking-grid,
+.sub-grid,
 .trend-layout {
   display: grid;
   gap: 14px;
@@ -477,7 +606,7 @@ onMounted(loadOverview);
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
-.ranking-grid,
+.sub-grid,
 .trend-layout {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
@@ -601,5 +730,9 @@ onMounted(loadOverview);
 
 .tone-danger {
   background: linear-gradient(180deg, #fff5f5 0%, #ffffff 100%);
+}
+
+.inline-link {
+  padding: 0;
 }
 </style>
